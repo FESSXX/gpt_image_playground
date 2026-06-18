@@ -1,10 +1,11 @@
 import { useEffect, useState, useRef, type ReactNode } from 'react'
 import type { TaskRecord } from '../types'
-import { useStore, ensureImageThumbnailCached, subscribeImageThumbnail, retryTask } from '../store'
+import { useStore, ensureImageCached, ensureImageThumbnailCached, subscribeImageThumbnail, retryTask } from '../store'
 import { formatImageRatio } from '../lib/size'
 import { getParamDisplay, ActualValueBadge } from '../lib/paramDisplay'
 import { DEFAULT_IMAGES_MODEL, DEFAULT_FAL_MODEL } from '../lib/apiProfiles'
 import { isAgentTaskPromptPending } from '../lib/taskPromptDisplay'
+import { isHttpUrl } from '../lib/imageApiShared'
 import { CodeIcon, TransparentBgIcon } from './icons'
 import ViewportTooltip from './ViewportTooltip'
 
@@ -252,7 +253,7 @@ export default function TaskCard({
     setThumbSrc('')
 
     let cancelled = false
-    const imageId = task.outputImages?.[0]
+    const imageId = task.outputImages?.[0] || task.rawImageUrls?.[0]
     let unsubscribe: (() => void) | undefined
 
     const applyThumbnail = (thumbnail: { dataUrl: string; width?: number; height?: number }) => {
@@ -265,6 +266,13 @@ export default function TaskCard({
     }
 
     if (imageId) {
+      if (isHttpUrl(imageId)) {
+        setThumbSrc(imageId)
+        return () => {
+          cancelled = true
+        }
+      }
+
       unsubscribe = subscribeImageThumbnail(imageId, applyThumbnail)
       ensureImageThumbnailCached(imageId).then((thumbnail) => {
         if (cancelled || !thumbnail) return
@@ -272,13 +280,17 @@ export default function TaskCard({
       }).catch(() => {
         if (!cancelled) setThumbSrc('')
       })
+      ensureImageCached(imageId).then((src) => {
+        if (cancelled || !src) return
+        setThumbSrc((current) => current || src)
+      }).catch(() => {})
     }
 
     return () => {
       cancelled = true
       unsubscribe?.()
     }
-  }, [task.outputImages])
+  }, [task.outputImages, task.rawImageUrls])
 
   const duration = (() => {
     let seconds: number
@@ -318,9 +330,11 @@ export default function TaskCard({
   const showPendingPrompt = isAgentTaskPromptPending(task)
   const showN = !isAgentTask && (task.params.n > 1 || nDisplay.isMismatch)
   const outputErrorCount = task.outputErrors?.length ?? 0
-  const outputSuccessCount = task.outputImages?.length ?? 0
-  const requestedOutputCount = Math.max(task.params.n, outputSuccessCount + outputErrorCount)
-  const hasPartialOutputFailure = task.status === 'done' && outputErrorCount > 0
+  const displayOutputImageIds = task.outputImages?.length ? task.outputImages : task.rawImageUrls ?? []
+  const displayOutputErrorCount = task.outputImages?.length ? outputErrorCount : 0
+  const outputSuccessCount = displayOutputImageIds.length
+  const requestedOutputCount = Math.max(task.params.n, outputSuccessCount + displayOutputErrorCount)
+  const hasPartialOutputFailure = task.status === 'done' && displayOutputErrorCount > 0
 
   const defaultModelForProvider = task.apiProvider === 'fal' ? DEFAULT_FAL_MODEL : DEFAULT_IMAGES_MODEL
   const showModel = task.apiModel && task.apiModel !== defaultModelForProvider
@@ -370,10 +384,10 @@ export default function TaskCard({
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchCancel}
-        draggable={task.status === 'done' && task.outputImages?.length > 0}
+        draggable={task.status === 'done' && displayOutputImageIds.length > 0}
         onDragStart={(e) => {
-          if (task.status !== 'done' || !task.outputImages?.length) return;
-          const imageIds = task.outputImages;
+          if (task.status !== 'done' || !displayOutputImageIds.length) return;
+          const imageIds = displayOutputImageIds;
           e.dataTransfer.setData('text/plain', `agent-images:${imageIds.join(',')}`);
           e.dataTransfer.effectAllowed = 'copy';
           // Optionally set drag image if we have thumbSrc
@@ -485,15 +499,23 @@ export default function TaskCard({
             <>
               <img
                 src={thumbSrc}
-                data-image-id={task.outputImages[0]}
-                data-output-image-ids={task.outputImages.join(',')}
+                data-image-id={displayOutputImageIds[0]}
+                data-output-image-ids={displayOutputImageIds.join(',')}
                 className="saveable-image w-full h-full object-cover"
                 loading="lazy"
                 alt=""
+                onLoad={(e) => {
+                  const image = e.currentTarget
+                  if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                    setCoverRatio(formatImageRatio(image.naturalWidth, image.naturalHeight))
+                    setCoverSize(`${image.naturalWidth}×${image.naturalHeight}`)
+                  }
+                }}
+                onError={() => setThumbSrc('')}
               />
-              {(hasPartialOutputFailure || task.outputImages.length > 1) && (
+              {(hasPartialOutputFailure || displayOutputImageIds.length > 1) && (
                 <span className="absolute bottom-1 right-1 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded">
-                  {hasPartialOutputFailure ? <>{requestedOutputCount} | <span className="font-semibold text-yellow-300">{outputSuccessCount}</span></> : task.outputImages.length}
+                  {hasPartialOutputFailure ? <>{requestedOutputCount} | <span className="font-semibold text-yellow-300">{outputSuccessCount}</span></> : displayOutputImageIds.length}
                 </span>
               )}
             </>

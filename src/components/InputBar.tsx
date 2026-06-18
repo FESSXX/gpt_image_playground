@@ -2358,7 +2358,7 @@ export default function InputBar() {
           )}
 
           {/* 输入框 */}
-          <div className="relative grid">
+          <div className={`relative grid ${promptOptimizing ? 'prompt-optimizing-wrap' : ''}`}>
             {showAtImageMenu && (
               <div style={{ left: `${menuLeft}px` }} className="absolute bottom-full z-50 mb-2 w-64 overflow-hidden rounded-2xl border border-gray-200/70 bg-white/95 p-1.5 shadow-xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10">
                 <div className="px-2 pb-1 pt-0.5 text-[11px] text-gray-400 dark:text-gray-500">选择图片引用</div>
@@ -2431,7 +2431,7 @@ export default function InputBar() {
                 syncMentionTagSelection(el)
               }}
               aria-label={promptPlaceholder}
-              className="col-start-1 row-start-1 min-h-[42px] w-full overflow-hidden ios-rounded-scroll-fix whitespace-pre-wrap break-words rounded-2xl border border-gray-200/60 bg-white/50 pl-4 pr-10 py-3 text-sm leading-relaxed shadow-sm outline-none transition-[border-color,box-shadow] duration-200 focus:ring-1 focus:ring-blue-300/40 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100 dark:focus:ring-blue-500/30"
+              className={`col-start-1 row-start-1 min-h-[42px] w-full overflow-hidden ios-rounded-scroll-fix whitespace-pre-wrap break-words rounded-2xl border border-gray-200/60 bg-white/50 pl-4 pr-10 py-3 text-sm leading-relaxed shadow-sm outline-none transition-[border-color,box-shadow,background-color] duration-200 focus:ring-1 focus:ring-blue-300/40 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100 dark:focus:ring-blue-500/30 ${promptOptimizing ? 'prompt-optimizing-input' : ''}`}
             />
             {prompt.length === 0 && (
               <div className={`prompt-placeholder col-start-1 row-start-1 pointer-events-none pl-4 pr-10 py-3 text-sm leading-relaxed text-gray-400 dark:text-gray-500${
@@ -2440,7 +2440,7 @@ export default function InputBar() {
                 {promptPlaceholder}
               </div>
             )}
-            {prompt.length > 0 && (
+            {prompt.length > 0 && !promptOptimizing && (
               <button
                 type="button"
                 onClick={handleClearPrompt}
@@ -2451,6 +2451,11 @@ export default function InputBar() {
               >
                 <CloseIcon className="w-3.5 h-3.5" />
               </button>
+            )}
+            {promptOptimizing && (
+              <div className="prompt-optimizing-copy pointer-events-none col-start-1 row-start-1 z-20 pl-4 pr-10 py-3 text-sm font-semibold leading-relaxed">
+                <span className="prompt-optimizing-status-text">润色中，正在重写画面语言<span className="prompt-optimizing-dots" /></span>
+              </div>
             )}
           </div>
 

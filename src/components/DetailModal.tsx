@@ -9,6 +9,7 @@ import { copyImageSourceToClipboard, copyTextToClipboard, getClipboardFailureMes
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import { downloadImageEntriesAsZip, downloadImageIds, getImageZipEntries } from '../lib/downloadImages'
+import { isHttpUrl } from '../lib/imageApiShared'
 import { isAgentTaskPromptPending } from '../lib/taskPromptDisplay'
 import { replaceImageMentionsForApi } from '../lib/promptImageMentions'
 import { CloseIcon, CodeIcon, CopyIcon, DownloadIcon, EditIcon, LinkIcon, TrashIcon } from './icons'
@@ -165,6 +166,8 @@ export default function DetailModal() {
     let outputImageIndex = 0
     return Array.from({ length: requestedCount }, (_, requestIndex) => {
       const error = errorsByIndex.get(requestIndex)
+      const rawImageUrl = task.rawImageUrls?.[requestIndex]
+      if (error && rawImageUrl) return { requestIndex, outputImageIndex: -1, imageId: rawImageUrl, error: '' }
       if (error) return { requestIndex, outputImageIndex: -1, imageId: '', error }
       const imageId = task.outputImages[outputImageIndex] ?? ''
       const slot = { requestIndex, outputImageIndex, imageId, error: '' }
@@ -172,6 +175,7 @@ export default function DetailModal() {
       return slot
     })
   }, [task])
+  const outputImageIdsForDisplay = useMemo(() => outputSlots.map((slot) => slot.imageId).filter(Boolean), [outputSlots])
   const currentOutputSlot = outputSlots[imageIndex]
   const currentOutputImageId = currentOutputSlot?.imageId || ''
   const currentOutputImageIndex = currentOutputSlot?.outputImageIndex ?? -1
@@ -180,7 +184,7 @@ export default function DetailModal() {
   const currentOutputPreviewSrc = currentOutputImageId ? outputPreviewSrcs[currentOutputImageId] || '' : ''
 
   useEffect(() => {
-    const outputImageIds = task?.outputImages ?? []
+    const outputImageIds = outputImageIdsForDisplay
     if (outputImageIds.length === 0) {
       setOutputPreviewSrcs({})
       return
@@ -207,7 +211,7 @@ export default function DetailModal() {
     return () => {
       cancelled = true
     }
-  }, [task?.outputImages])
+  }, [outputImageIdsForDisplay])
 
   useEffect(() => {
     let cancelled = false
@@ -267,7 +271,7 @@ export default function DetailModal() {
   const currentStreamPreviewSrc = activeStreamPreviewSrc
   const streamPartialImageIds = task.streamPartialImageIds ?? []
   const isPngOutput = task.params.output_format === 'png'
-  const transparentOutputText = task.transparentOutput || task.params.transparent_output ? 'true' : 'false'
+  const transparentOutputText = task.transparentOutput || task.params.transparent_output ? '开启' : '关闭'
   const currentTransparentOutputFailed = Boolean(currentOutputImageId && task.transparentOutput && task.transparentOriginalImages?.[currentOutputImageIndex] === '')
   const outputCompressionText = task.params.output_compression == null ? '未设置' : String(task.params.output_compression)
 
@@ -389,13 +393,14 @@ export default function DetailModal() {
 
   const handleDownloadAllOutputs = async (e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!task?.outputImages?.length) return
+    if (!task || !outputImageIdsForDisplay.length) return
 
     try {
       const fileNameBase = `task-${task.id}`
-      const result = settings.zipDownloadRoutes.includes('task-detail-all')
-        ? await downloadImageEntriesAsZip(getImageZipEntries(task.outputImages, fileNameBase), fileNameBase)
-        : await downloadImageIds(task.outputImages, fileNameBase)
+      const hasRemoteOutput = outputImageIdsForDisplay.some(isHttpUrl)
+      const result = settings.zipDownloadRoutes.includes('task-detail-all') && !hasRemoteOutput
+        ? await downloadImageEntriesAsZip(getImageZipEntries(outputImageIdsForDisplay, fileNameBase), fileNameBase)
+        : await downloadImageIds(outputImageIdsForDisplay, fileNameBase)
       if (result.successCount === 0) {
         showToast('下载失败', 'error')
       } else if (result.failCount > 0) {
@@ -498,7 +503,7 @@ export default function DetailModal() {
                   </ViewportTooltip>
                 </div>
               )}
-              {task.outputImages.length > 1 && (
+              {outputImageIdsForDisplay.length > 1 && (
                 <div className="relative group flex">
                   <button
                     type="button"
@@ -540,7 +545,7 @@ export default function DetailModal() {
                   }
                 }}
                 onClick={() =>
-                  setLightboxImageId(currentOutputImageId, task.outputImages)
+                  setLightboxImageId(currentOutputImageId, outputImageIdsForDisplay)
                 }
                 alt=""
               />
@@ -1028,7 +1033,7 @@ export default function DetailModal() {
                     <span className="font-medium text-gray-700 dark:text-gray-300">{transparentOutputText}</span>
                     {currentTransparentOutputFailed && (
                       <span className="ml-1.5 rounded bg-red-50 px-1 py-0.5 text-[10px] font-medium uppercase leading-none text-red-600 dark:bg-red-500/10 dark:text-red-400">
-                        failed
+                        失败
                       </span>
                     )}
                   </div>

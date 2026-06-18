@@ -147,7 +147,7 @@ export async function fetchImageUrlAsDataUrl(url: string, fallbackMime: string, 
     if (err instanceof TypeError) {
       const probe = await probeNoCorsReachability(url)
       if (probe === 'opaque') {
-        throw new Error(`图片已生成，但因服务商未允许跨域，图片链接下载失败。${IMAGE_FETCH_CORS_HINT}`)
+        return url
       }
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
         throw new Error(`图片链接下载失败（网络不可用）。${IMAGE_FETCH_CORS_HINT}`)

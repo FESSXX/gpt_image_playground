@@ -118,6 +118,60 @@ input[type="number"] {
   100% { background-position: -100% center; }
 }
 
+@keyframes prompt-optimizing-border {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.16), 0 8px 22px rgba(59, 130, 246, 0.06); }
+  50% { box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.28), 0 8px 24px rgba(59, 130, 246, 0.1); }
+}
+
+@keyframes prompt-optimizing-text {
+  0% { background-position: 180% center; }
+  100% { background-position: -80% center; }
+}
+
+@keyframes prompt-optimizing-dots {
+  0%, 18% { content: ''; }
+  36% { content: '.'; }
+  64% { content: '..'; }
+  100% { content: '...'; }
+}
+
+.prompt-optimizing-wrap::before {
+  content: none;
+}
+
+.prompt-optimizing-input {
+  position: relative;
+  z-index: 10;
+  border-color: rgba(96, 165, 250, 0.45);
+  color: transparent !important;
+  caret-color: transparent;
+  background: rgba(255, 255, 255, 0.72);
+  animation: prompt-optimizing-border 1.8s ease-in-out infinite;
+}
+
+.prompt-optimizing-input .mention-tag {
+  opacity: 0;
+}
+
+.prompt-optimizing-copy {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.prompt-optimizing-status-text {
+  background-image: linear-gradient(90deg, #6b7280, #2563eb, #6b7280);
+  background-size: 260% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: prompt-optimizing-text 2.2s linear infinite;
+}
+
+.prompt-optimizing-dots::after {
+  content: '';
+  animation: prompt-optimizing-dots 1.2s steps(1, end) infinite;
+}
+
 .agent-web-search-running-text {
   --agent-web-search-text: #6b7280;
   --agent-web-search-highlight: #ffffff;
@@ -151,6 +205,17 @@ input[type="number"] {
     color: var(--agent-web-search-text);
     background-image: none;
     animation: none;
+  }
+
+  .prompt-optimizing-wrap::before,
+  .prompt-optimizing-status-text,
+  .prompt-optimizing-dots::after {
+    animation: none;
+  }
+
+  .prompt-optimizing-status-text {
+    color: inherit;
+    background-image: none;
   }
 }
 
