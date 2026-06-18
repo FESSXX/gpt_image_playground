@@ -2,12 +2,23 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from '../types'
 import { DEFAULT_SETTINGS } from './apiProfiles'
 import { callImageApi } from './api'
+import { fetchImageUrlAsDataUrl } from './imageApiShared'
 
 describe('callImageApi', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllEnvs()
     vi.useRealTimers()
+  })
+
+  it('keeps reachable cross-origin image URLs as outputs when they cannot be fetched as data URLs', async () => {
+    const imageUrl = 'https://cdn.example.com/image.png'
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce({ type: 'opaque' } as Response)
+
+    await expect(fetchImageUrlAsDataUrl(imageUrl, 'image/png')).resolves.toBe(imageUrl)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it.each([false, true])(
