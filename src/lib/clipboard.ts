@@ -1,3 +1,5 @@
+import { getImageProxyUrl, isImageProxyAvailable } from './imageProxy'
+
 export async function copyTextToClipboard(text: string) {
   let asyncClipboardError: unknown = null
 
@@ -16,15 +18,37 @@ export async function copyTextToClipboard(text: string) {
 }
 
 export async function copyImageSourceToClipboard(src: string | Promise<string | undefined>) {
-  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
-    throw new Error('Clipboard image API is not available')
-  }
-
   const resolvedSrc = await Promise.resolve(src)
   if (!resolvedSrc) throw new Error('Image source is not available')
-  const res = await fetch(resolvedSrc)
-  const blob = await res.blob()
-  await writeImageBlobToClipboard(blob)
+
+  if (isHttpUrl(resolvedSrc) && isImageProxyAvailable()) {
+    try {
+      const res = await fetch(getImageProxyUrl(resolvedSrc))
+      const blob = await res.blob()
+      await writeImageBlobToClipboard(blob)
+      return
+    } catch {
+      // Fall through to HTML image copy when the deployment has no working image proxy.
+    }
+  }
+
+  if (isHttpUrl(resolvedSrc)) {
+    if (await writeRemoteImageHtmlToClipboard(resolvedSrc)) return
+    if (copyImageElementWithExecCommand(resolvedSrc)) return
+    throw new Error('当前浏览器无法在跨域限制下复制原始图片')
+  }
+
+  try {
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+      throw new Error('Clipboard image API is not available')
+    }
+
+    const res = await fetch(resolvedSrc)
+    const blob = await res.blob()
+    await writeImageBlobToClipboard(blob)
+  } catch (err) {
+    throw err
+  }
 }
 
 export function getClipboardFailureMessage(fallback: string, err: unknown) {
@@ -58,6 +82,63 @@ function copyTextWithExecCommand(text: string) {
   } finally {
     document.body.removeChild(textarea)
   }
+}
+
+function copyImageElementWithExecCommand(src: string) {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return false
+
+  const wrapper = document.createElement('div')
+  const img = document.createElement('img')
+  wrapper.contentEditable = 'true'
+  wrapper.style.position = 'fixed'
+  wrapper.style.left = '-9999px'
+  wrapper.style.top = '0'
+  img.src = src
+  img.alt = ''
+  wrapper.appendChild(img)
+  document.body.appendChild(wrapper)
+
+  const selection = window.getSelection()
+  if (!selection) {
+    document.body.removeChild(wrapper)
+    return false
+  }
+
+  try {
+    const range = document.createRange()
+    range.selectNode(wrapper)
+    selection.removeAllRanges()
+    selection.addRange(range)
+    return document.execCommand('copy')
+  } catch {
+    return false
+  } finally {
+    selection.removeAllRanges()
+    document.body.removeChild(wrapper)
+  }
+}
+
+async function writeRemoteImageHtmlToClipboard(src: string) {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') return false
+
+  try {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'text/html': new Blob([`<img src="${escapeHtmlAttribute(src)}">`], { type: 'text/html' }),
+      }),
+    ])
+    return true
+  } catch {
+    return false
+  }
+}
+
+function escapeHtmlAttribute(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
 }
 
 async function writeImageBlobToClipboard(blob: Blob) {
@@ -117,6 +198,10 @@ function isEmbeddedPage() {
   } catch {
     return true
   }
+}
+
+function isHttpUrl(value: string) {
+  return /^https?:\/\//i.test(value)
 }
 
 function isClipboardPermissionError(err: unknown) {

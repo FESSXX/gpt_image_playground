@@ -330,7 +330,7 @@ export default function TaskCard({
   const showPendingPrompt = isAgentTaskPromptPending(task)
   const showN = !isAgentTask && (task.params.n > 1 || nDisplay.isMismatch)
   const outputErrorCount = task.outputErrors?.length ?? 0
-  const displayOutputImageIds = task.outputImages?.length ? task.outputImages : task.rawImageUrls ?? []
+  const displayOutputImageIds = (task.rawImageUrls?.length ?? 0) > task.outputImages.length ? task.rawImageUrls! : task.outputImages
   const displayOutputErrorCount = task.outputImages?.length ? outputErrorCount : 0
   const outputSuccessCount = displayOutputImageIds.length
   const requestedOutputCount = Math.max(task.params.n, outputSuccessCount + displayOutputErrorCount)

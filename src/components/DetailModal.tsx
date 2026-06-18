@@ -16,6 +16,34 @@ import { CloseIcon, CodeIcon, CopyIcon, DownloadIcon, EditIcon, LinkIcon, TrashI
 
 import ViewportTooltip from './ViewportTooltip'
 
+function collectHttpUrls(value: unknown, urls: Set<string>) {
+  if (typeof value === 'string') {
+    if (isHttpUrl(value)) urls.add(value)
+    return
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) collectHttpUrls(item, urls)
+    return
+  }
+
+  if (value && typeof value === 'object') {
+    for (const item of Object.values(value as Record<string, unknown>)) collectHttpUrls(item, urls)
+  }
+}
+
+function extractRawResponseImageUrls(rawResponsePayload?: string) {
+  if (!rawResponsePayload) return []
+
+  try {
+    const urls = new Set<string>()
+    collectHttpUrls(JSON.parse(rawResponsePayload), urls)
+    return [...urls]
+  } catch {
+    return []
+  }
+}
+
 export default function DetailModal() {
   const tasks = useStore((s) => s.tasks)
   const detailTaskId = useStore((s) => s.detailTaskId)
@@ -149,11 +177,16 @@ export default function DetailModal() {
   const maskTargetSrc = maskTargetId ? imageSrcs[maskTargetId] || '' : ''
   const maskSrc = task?.maskImageId ? imageSrcs[task.maskImageId] || '' : ''
   const allInputImageIds = task?.inputImageIds ?? []
+  const rawImageUrlsForDisplay = useMemo(
+    () => [...new Set([...(task?.rawImageUrls ?? []), ...extractRawResponseImageUrls(task?.rawResponsePayload)])],
+    [task?.rawImageUrls, task?.rawResponsePayload],
+  )
   const outputSlots = useMemo(() => {
     if (!task) return []
     const outputErrors = task.outputErrors ?? []
+    const displayOutputImages = rawImageUrlsForDisplay.length > task.outputImages.length ? rawImageUrlsForDisplay : task.outputImages
     if (outputErrors.length === 0) {
-      return task.outputImages.map((imageId, outputImageIndex) => ({
+      return displayOutputImages.map((imageId, outputImageIndex) => ({
         requestIndex: outputImageIndex,
         outputImageIndex,
         imageId,
@@ -166,15 +199,15 @@ export default function DetailModal() {
     let outputImageIndex = 0
     return Array.from({ length: requestedCount }, (_, requestIndex) => {
       const error = errorsByIndex.get(requestIndex)
-      const rawImageUrl = task.rawImageUrls?.[requestIndex]
+      const rawImageUrl = rawImageUrlsForDisplay[requestIndex]
       if (error && rawImageUrl) return { requestIndex, outputImageIndex: -1, imageId: rawImageUrl, error: '' }
       if (error) return { requestIndex, outputImageIndex: -1, imageId: '', error }
-      const imageId = task.outputImages[outputImageIndex] ?? ''
+      const imageId = displayOutputImages[outputImageIndex] ?? ''
       const slot = { requestIndex, outputImageIndex, imageId, error: '' }
       outputImageIndex += 1
       return slot
     })
-  }, [task])
+  }, [rawImageUrlsForDisplay, task])
   const outputImageIdsForDisplay = useMemo(() => outputSlots.map((slot) => slot.imageId).filter(Boolean), [outputSlots])
   const currentOutputSlot = outputSlots[imageIndex]
   const currentOutputImageId = currentOutputSlot?.imageId || ''
@@ -266,7 +299,7 @@ export default function DetailModal() {
   const showSourceInfo = Boolean(task.apiProvider || task.apiProfileName || task.apiModel)
   const isFalReconnecting = task.status === 'error' && task.falRecoverable
   const isCustomReconnecting = task.status === 'error' && task.customRecoverable
-  const rawImageUrls = task.rawImageUrls ?? []
+  const rawImageUrls = rawImageUrlsForDisplay
   const streamPreviewLen = streamPreviewItems.length
   const currentStreamPreviewSrc = activeStreamPreviewSrc
   const streamPartialImageIds = task.streamPartialImageIds ?? []
@@ -785,17 +818,17 @@ export default function DetailModal() {
                     </ViewportTooltip>
                   </div>
                 )}
-                {task.rawImageUrls && task.rawImageUrls.length > 0 && (
+                {rawImageUrls.length > 0 && (
                   <>
                     <div className="relative group">
                       <button
                         type="button"
                         {...copyRawUrlsTooltip.handlers}
                         onClick={async () => {
-                          if (task.rawImageUrls!.length === 1) {
+                          if (rawImageUrls.length === 1) {
                             copyRawUrlsTooltip.handlers.onClick()
                             try {
-                              await copyTextToClipboard(task.rawImageUrls![0])
+                              await copyTextToClipboard(rawImageUrls[0])
                               showToast('图片链接已复制', 'success')
                             } catch (err) {
                               showToast(getClipboardFailureMessage('复制链接失败', err), 'error')

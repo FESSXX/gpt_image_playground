@@ -21,6 +21,21 @@ describe('callImageApi', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('fetches cross-origin image URLs through the same-origin image proxy when API proxy is available', async () => {
+    vi.stubEnv('VITE_API_PROXY_AVAILABLE', 'true')
+    const imageUrl = 'https://cdn.example.com/image.png?sig=1'
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new Blob(['image-bytes'], { type: 'image/png' }), {
+      status: 200,
+      headers: { 'Content-Type': 'image/png' },
+    }))
+
+    await expect(fetchImageUrlAsDataUrl(imageUrl, 'image/png')).resolves.toMatch(/^data:image\/png;base64,/)
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/image-proxy?url=${encodeURIComponent(imageUrl)}`,
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+  })
+
   it.each([false, true])(
     'adds the prompt rewrite guard on Responses API when Codex CLI mode is %s',
     async (codexCli) => {
