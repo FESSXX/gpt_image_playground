@@ -1,4 +1,5 @@
 import type { AppSettings, TaskParams } from '../types'
+import { getImageProxyUrl } from './imageProxy'
 
 export const MIME_MAP: Record<string, string> = {
   png: 'image/png',
@@ -95,7 +96,7 @@ async function blobToDataUrl(blob: Blob, fallbackMime: string): Promise<string> 
   return `data:${blob.type || fallbackMime};base64,${btoa(binary)}`
 }
 
-export const IMAGE_FETCH_CORS_HINT = ' 可点链接按钮复制结果链接，也可点下载按钮直接下载原始链接；或尝试开启「返回 Base64 图片数据」避免此问题。'
+export const IMAGE_FETCH_CORS_HINT = ' 可尝试开启「API 代理」通过同源图片代理读取结果图，或开启「返回 Base64 图片数据」避免此问题。'
 export const STREAMING_UNSUPPORTED_HINT = '提示：当前使用的 API 可能不支持流式传输，请尝试关闭「流式传输」功能。'
 export const STREAMING_FORMAT_HINT = '提示：API 返回了无法解析的流式数据格式，请尝试关闭「流式传输」功能。'
 
@@ -137,14 +138,26 @@ async function probeNoCorsReachability(url: string, timeoutMs = 8000): Promise<'
 export async function fetchImageUrlAsDataUrl(url: string, fallbackMime: string, signal?: AbortSignal): Promise<string> {
   if (isDataUrl(url)) return url
 
-  let response: Response
+  let response: Response | null = null
+  const fetchUrl = getImageProxyUrl(url)
   try {
-    response = await fetch(url, {
+    response = await fetch(fetchUrl, {
       cache: 'no-store',
       signal,
     })
   } catch (err) {
-    if (err instanceof TypeError) {
+    if (fetchUrl !== url) {
+      try {
+        response = await fetch(url, {
+          cache: 'no-store',
+          signal,
+        })
+      } catch (fallbackErr) {
+        err = fallbackErr
+      }
+    }
+
+    if (!response && err instanceof TypeError) {
       const probe = await probeNoCorsReachability(url)
       if (probe === 'opaque') {
         return url
@@ -154,7 +167,7 @@ export async function fetchImageUrlAsDataUrl(url: string, fallbackMime: string, 
       }
       throw new Error(`图片链接下载失败（可能因跨域限制、链接过期或网络异常）。${IMAGE_FETCH_CORS_HINT}`)
     }
-    throw err
+    if (!response) throw err
   }
 
   if (!response.ok) {

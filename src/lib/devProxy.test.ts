@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApiUrl } from './devProxy'
+import { getImageProxyUrl } from './imageProxy'
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+})
 
 describe('buildApiUrl', () => {
   it('uses the same-origin proxy prefix when API proxy is enabled', () => {
@@ -34,6 +39,14 @@ describe('buildApiUrl', () => {
   it('uses the configured API URL directly when API proxy is disabled', () => {
     expect(buildApiUrl('http://api.example.com/v1', 'responses', null, false)).toBe(
       'http://api.example.com/v1/responses',
+    )
+  })
+
+  it('routes remote image URLs through the image proxy when API proxy is available', () => {
+    vi.stubEnv('VITE_API_PROXY_AVAILABLE', 'true')
+
+    expect(getImageProxyUrl('https://cdn.example.com/image.png?sig=1')).toBe(
+      '/image-proxy?url=https%3A%2F%2Fcdn.example.com%2Fimage.png%3Fsig%3D1',
     )
   })
 })

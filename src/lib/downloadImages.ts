@@ -2,6 +2,7 @@ import { ensureImageCached } from '../store'
 import { zipSync } from 'fflate'
 import type { TaskRecord } from '../types'
 import { isHttpUrl } from './imageApiShared'
+import { getImageProxyUrl, isImageProxyAvailable } from './imageProxy'
 
 const MIME_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
@@ -38,10 +39,11 @@ export async function downloadImageIds(imageIds: string[], fileNameBase = 'image
     try {
       const order = String(index + 1).padStart(2, '0')
       const imageId = imageIds[index]
-      if (isHttpUrl(imageId)) {
-        triggerUrlDownload(imageId, multiple ? `${fileNameBase}-${order}` : fileNameBase)
+      const source = await resolveImageSource(imageId)
+      if (isHttpUrl(source) && !isImageProxyAvailable()) {
+        triggerUrlDownload(source, multiple ? `${fileNameBase}-${order}` : fileNameBase)
       } else {
-        const blob = await getImageBlob(imageId)
+        const blob = await getImageBlob(source)
         const fileName = multiple
           ? `${fileNameBase}-${order}.${getBlobExtension(blob)}`
           : `${fileNameBase}.${getBlobExtension(blob)}`
@@ -69,9 +71,16 @@ export async function downloadImageEntriesAsZip(entries: DownloadImageZipEntry[]
   for (let index = 0; index < entries.length; index++) {
     const entry = entries[index]
     try {
-      const blob = await getImageBlob(entry.imageId)
       const order = String(index + 1).padStart(2, '0')
       const base = sanitizeFileNamePart(entry.fileNameBase || `image-${order}`) || `image-${order}`
+      const source = await resolveImageSource(entry.imageId)
+      if (isHttpUrl(source) && !isImageProxyAvailable()) {
+        triggerUrlDownload(source, base)
+        successCount++
+        continue
+      }
+
+      const blob = await getImageBlob(source)
       const ext = getBlobExtension(blob)
       let fileName = `${base}.${ext}`
       let duplicateIndex = 2
@@ -88,7 +97,7 @@ export async function downloadImageEntriesAsZip(entries: DownloadImageZipEntry[]
     }
   }
 
-  if (successCount > 0) {
+  if (Object.keys(zipFiles).length > 0) {
     const zipped = zipSync(zipFiles, { level: 6 })
     const buffer = zipped.buffer.slice(zipped.byteOffset, zipped.byteOffset + zipped.byteLength) as ArrayBuffer
     triggerDownload(new Blob([buffer], { type: 'application/zip' }), `${sanitizeFileNamePart(zipFileNameBase) || 'images'}.zip`)
@@ -112,14 +121,14 @@ export function getImageZipEntries(imageIds: string[], fileNameBase = 'image'): 
 }
 
 async function getImageBlob(imageIdOrUrl: string): Promise<Blob> {
-  let src = imageIdOrUrl
-  if (!imageIdOrUrl.startsWith('data:') && !imageIdOrUrl.startsWith('http://') && !imageIdOrUrl.startsWith('https://')) {
-    src = await ensureImageCached(imageIdOrUrl) ?? imageIdOrUrl
-  }
-
-  const res = await fetch(src)
-  if (!res.ok && !src.startsWith('data:')) throw new Error(`读取图片失败：${imageIdOrUrl}`)
+  const res = await fetch(getImageProxyUrl(imageIdOrUrl))
+  if (!res.ok && !imageIdOrUrl.startsWith('data:')) throw new Error(`读取图片失败：${imageIdOrUrl}`)
   return await res.blob()
+}
+
+async function resolveImageSource(imageIdOrUrl: string): Promise<string> {
+  if (imageIdOrUrl.startsWith('data:') || isHttpUrl(imageIdOrUrl)) return imageIdOrUrl
+  return await ensureImageCached(imageIdOrUrl) ?? imageIdOrUrl
 }
 
 function triggerDownload(blob: Blob, fileName: string) {
@@ -138,6 +147,7 @@ function triggerUrlDownload(url: string, fileName: string) {
   a.href = url
   a.download = sanitizeFileNamePart(fileName) || 'image'
   a.rel = 'noopener noreferrer'
+  a.target = '_blank'
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
