@@ -75,6 +75,7 @@ export default function DetailModal() {
   const rawResponseBackdropPointerDownRef = useRef(false)
 
   const copyErrorTooltip = useTooltip()
+  const promptTooltip = useTooltip()
   const copyRawUrlsTooltip = useTooltip()
   const viewRawResponseTooltip = useTooltip()
   const downloadPartialImagesTooltip = useTooltip()
@@ -268,6 +269,7 @@ export default function DetailModal() {
 
   const isAgentTask = task.sourceMode === 'agent' || Boolean(task.agentConversationId || task.agentRoundId)
   const showPendingPrompt = isAgentTaskPromptPending(task)
+  const showPromptTooltip = Boolean(task.prompt && !showPendingPrompt)
   const isAgentEditTool = task.status === 'done' && String(task.agentToolAction ?? '').toLowerCase() === 'edit'
   const showReferenceSection = allInputImageIds.length > 0 || isAgentEditTool
 
@@ -902,7 +904,7 @@ export default function DetailModal() {
         </div>
 
         {/* 右侧：信息 */}
-        <div className="md:w-[48%] w-full p-6 overflow-y-auto overscroll-contain flex flex-col">
+        <div className="md:w-[48%] w-full min-w-0 overflow-x-hidden p-6 overflow-y-auto overscroll-contain hide-scrollbar flex flex-col">
           <button
             onClick={() => setDetailTaskId(null)}
             className="absolute top-3 right-3 hidden p-1 rounded-full hover:bg-gray-100 dark:hover:bg-white/[0.06] transition text-gray-400 z-10 md:block"
@@ -911,7 +913,7 @@ export default function DetailModal() {
             <CloseIcon className="w-5 h-5" />
           </button>
 
-          <div data-selectable-text className="flex-1">
+          <div data-selectable-text className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 mb-2">
               <h3 className="text-sm font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
                 输入内容
@@ -946,9 +948,25 @@ export default function DetailModal() {
                 <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">输入内容将在响应完成时接收</p>
               </div>
             ) : (
-              <p className="text-base text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap mb-5">
-                {task.prompt || '(无提示词)'}
-              </p>
+              <div className="relative mb-5" {...(showPromptTooltip ? promptTooltip.handlers : {})}>
+                <p
+                  className="cursor-help overflow-hidden text-base leading-relaxed text-gray-700 dark:text-gray-300"
+                  style={{
+                    display: '-webkit-box',
+                    WebkitBoxOrient: 'vertical',
+                    WebkitLineClamp: 5,
+                    whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {task.prompt || '(无提示词)'}
+                </p>
+                <ViewportTooltip
+                  visible={showPromptTooltip && promptTooltip.visible}
+                  className="max-w-[min(42rem,calc(100vw-2rem))] whitespace-pre-wrap text-left text-sm leading-relaxed"
+                >
+                  {task.prompt}
+                </ViewportTooltip>
+              </div>
             )}
             {showRevisedPrompt && currentRevisedPrompt && (
               <div className="mb-4">
@@ -1106,10 +1124,10 @@ export default function DetailModal() {
           </div>
 
           {/* 操作按钮 */}
-          <div className="grid grid-cols-4 sm:flex gap-3 pt-5 border-t border-gray-100 dark:border-white/[0.08]">
+          <div className="grid grid-cols-[1fr_1fr_1fr_3rem] gap-3 pt-5 border-t border-gray-100 dark:border-white/[0.08]">
             <button
               onClick={handleReuse}
-              className="col-span-2 sm:flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 transition text-base font-medium whitespace-nowrap"
+              className="flex min-w-0 items-center justify-center gap-2 rounded-xl bg-blue-50 px-3 py-2.5 text-base font-medium text-blue-600 transition hover:bg-blue-100 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/20 whitespace-nowrap"
             >
               <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
@@ -1119,21 +1137,21 @@ export default function DetailModal() {
             <button
               onClick={handleEdit}
               disabled={!outputLen}
-              className="col-span-2 sm:flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-green-50 dark:bg-green-500/10 text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition text-base font-medium whitespace-nowrap"
+              className="flex min-w-0 items-center justify-center gap-2 rounded-xl bg-green-50 px-3 py-2.5 text-base font-medium text-green-600 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-green-500/10 dark:text-green-400 dark:hover:bg-green-500/20 whitespace-nowrap"
             >
               <EditIcon className="w-5 h-5 flex-shrink-0" />
               编辑输出
             </button>
             <button
               onClick={handleDelete}
-              className="col-span-3 sm:flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-500/20 transition text-base font-medium whitespace-nowrap"
+              className="flex min-w-0 items-center justify-center gap-2 rounded-xl bg-red-50 px-3 py-2.5 text-base font-medium text-red-600 transition hover:bg-red-100 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20 whitespace-nowrap"
             >
               <TrashIcon className="w-5 h-5 flex-shrink-0" />
               删除任务
             </button>
             <button
               onClick={handleToggleFavorite}
-              className={`col-span-1 sm:flex-none sm:w-12 w-full flex items-center justify-center rounded-xl transition ${
+              className={`flex w-12 items-center justify-center rounded-xl transition ${
                 task.isFavorite
                   ? 'bg-yellow-50 text-yellow-500 hover:bg-yellow-100 dark:bg-yellow-500/10 dark:hover:bg-yellow-500/20'
                   : 'bg-gray-50 text-gray-400 hover:bg-yellow-50 hover:text-yellow-500 dark:bg-white/[0.04] dark:hover:bg-yellow-500/10'

@@ -1,5 +1,6 @@
 import { DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type CustomProviderDefinition, type CustomProviderPollMapping, type CustomProviderResultMapping, type CustomProviderSubmitMapping, type ImageApiResponse, type ImageResponseItem, type ResponsesApiResponse, type ResponsesOutputItem, type TaskParams } from '../types'
 import { dataUrlToBlob, imageDataUrlToPngBlob, maskDataUrlToPngBlob } from './canvasImage'
+import { getAgentApiProfile } from './apiProfiles'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
 import {
   assertImageInputPayloadSize,
@@ -251,9 +252,11 @@ function parseResponsesImageResults(payload: ResponsesApiResponse, fallbackMime:
   }
 
   const results: Array<{ image: string; actualParams?: Partial<TaskParams>; revisedPrompt?: string }> = []
+  let hasPendingImage = false
 
   for (const item of output) {
     if (item?.type !== 'image_generation_call') continue
+    if (item.status === 'in_progress' || item.status === 'generating') hasPendingImage = true
 
     const b64 = getResponsesImageResultBase64(item.result)
     if (b64) {
@@ -266,7 +269,9 @@ function parseResponsesImageResults(payload: ResponsesApiResponse, fallbackMime:
   }
 
   if (!results.length) {
-    const err = new Error('接口没有返回可识别的图片数据，请查看原始响应内容确认服务商实际返回的数据结构。如果使用的是中转或兼容接口，建议创建并使用「自定义服务商」配置。')
+    const err = new Error(hasPendingImage
+      ? '图片仍在生成中，接口只返回了 in_progress 状态。请开启流式传输，或使用支持等待 image_generation 完成的 Responses 接口。'
+      : '接口没有返回可识别的图片数据，请查看原始响应内容确认服务商实际返回的数据结构。如果使用的是中转或兼容接口，建议创建并使用「自定义服务商」配置。')
     ;(err as any).rawResponsePayload = JSON.stringify(payload, null, 2)
     throw err
   }
@@ -480,6 +485,10 @@ async function parseResponsesApiStreamResponse(
 export async function callOpenAICompatibleImageApi(opts: CallApiOptions, profile: ApiProfile, customProvider?: CustomProviderDefinition | null): Promise<CallApiResult> {
   if (customProvider) {
     return callCustomHttpImageApi(opts, profile, customProvider)
+  }
+
+  if (profile.provider === 'openai' && profile.apiMode === 'images' && opts.inputImageDataUrls.length > 0) {
+    return callResponsesImageApi(opts, { ...getAgentApiProfile(opts.settings), streamImages: true })
   }
 
   return profile.apiMode === 'responses'

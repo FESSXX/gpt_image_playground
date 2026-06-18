@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from '../types'
-import { DEFAULT_SETTINGS } from './apiProfiles'
+import { createDefaultOpenAIProfile, DEFAULT_SETTINGS } from './apiProfiles'
 import { callImageApi } from './api'
 import { fetchImageUrlAsDataUrl } from './imageApiShared'
 
@@ -34,6 +34,71 @@ describe('callImageApi', () => {
       `/image-proxy?url=${encodeURIComponent(imageUrl)}`,
       expect.objectContaining({ cache: 'no-store' }),
     )
+  })
+
+  it('uses the Agent Responses profile for OpenAI reference image edits instead of the multipart edits endpoint', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      output: [{ type: 'image_generation_call', result: 'aW1hZ2U=' }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const imageProfile = createDefaultOpenAIProfile({
+      id: 'image-profile',
+      apiKey: 'image-key',
+      model: 'gpt-image-2',
+      apiMode: 'images',
+    })
+    const agentProfile = createDefaultOpenAIProfile({
+      id: 'agent-profile',
+      baseUrl: 'https://agent.example.com/v1',
+      apiKey: 'agent-key',
+      model: 'agent-model',
+      apiMode: 'responses',
+    })
+
+    await callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        profiles: [imageProfile, agentProfile],
+        activeProfileId: imageProfile.id,
+        agentProfileId: agentProfile.id,
+      },
+      prompt: '@图1 改成 3D 风格',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: ['data:image/png;base64,cmVm'],
+    })
+
+    const [url, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String((init as RequestInit).body))
+    expect(url).toBe('https://agent.example.com/v1/responses')
+    expect(body.model).toBe('agent-model')
+    expect(body.stream).toBe(true)
+    expect(body.input[0].content).toEqual([
+      { type: 'input_text', text: 'Use the following text as the complete prompt. Do not rewrite it:\n@图1 改成 3D 风格' },
+      { type: 'input_image', image_url: 'data:image/png;base64,cmVm' },
+    ])
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer agent-key' })
+  })
+
+  it('reports pending Responses image calls clearly', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      output: [{
+        id: 'ig_1',
+        status: 'in_progress',
+        type: 'image_generation_call',
+      }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    await expect(callImageApi({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', apiMode: 'responses' },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    })).rejects.toThrow('图片仍在生成中')
   })
 
   it.each([false, true])(
