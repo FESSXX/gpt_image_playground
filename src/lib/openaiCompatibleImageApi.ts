@@ -488,7 +488,10 @@ export async function callOpenAICompatibleImageApi(opts: CallApiOptions, profile
   }
 
   if (profile.provider === 'openai' && profile.apiMode === 'images' && opts.inputImageDataUrls.length > 0) {
-    return callResponsesImageApi(opts, { ...getAgentApiProfile(opts.settings), streamImages: true })
+    const agentProfile = getAgentApiProfile(opts.settings)
+    if (agentProfile.provider === 'openai' && agentProfile.apiMode === 'responses') {
+      return callResponsesImageApi(opts, { ...agentProfile, streamImages: true })
+    }
   }
 
   return profile.apiMode === 'responses'
