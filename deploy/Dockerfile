@@ -25,6 +25,7 @@ ENV DEFAULT_API_URL=
 ENV API_PROXY_URL=
 ENV ENABLE_API_PROXY=false
 ENV LOCK_API_PROXY=false
+ENV IMAGE_PROXY_ALLOWED_HOST_PATTERN="(^|\.)oaidalleapiprodscus\.blob\.core\.windows\.net$|(^|\.)openai\.com$|(^|\.)fal\.media$|(^|\.)fal\.ai$"
 ENV SHOW_DEFAULT_CONFIG_ONLY=false
 
 COPY --from=build /app/dist /usr/share/nginx/html
