@@ -181,7 +181,7 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <h3 className="text-base font-semibold text-gray-800 dark:text-gray-100">设置图像尺寸</h3>
-            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">当前：{currentSize || 'auto'}</p>
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">当前：{currentSize === 'auto' ? '自动' : currentSize || '自动'}</p>
           </div>
           <button
             onClick={onClose}
@@ -348,7 +348,7 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
             <div className="text-xs text-gray-400 dark:text-gray-500">将使用</div>
             <div className="mt-1 flex items-center gap-2">
               <span className="font-mono text-lg font-semibold text-gray-800 dark:text-gray-100">
-                {previewSize || '尺寸无效'}
+                {previewSize === 'auto' ? '自动' : previewSize || '尺寸无效'}
               </span>
               {isClamped && (
                 <div

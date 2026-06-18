@@ -131,7 +131,7 @@ import { clearAgentConversations, clearImages, clearTasks, getAllAgentConversati
 import { callAgentResponsesApi, callBatchImageSingle } from './lib/agentApi'
 import { getFalQueuedImageResult } from './lib/falAiImageApi'
 import { removeKeyedBackgroundFromDataUrl } from './lib/transparentImage'
-import { cleanStaleAgentInputDrafts, clearFailedTasks, deleteAgentRoundFromConversation, deleteFavoriteCollection, editOutputs, getActiveAgentRounds, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, markInterruptedOpenAIRunningTasks, migratePersistedState, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeTask, reuseConfig, submitAgentMessage, submitTask, taskMatchesFilterStatus, taskMatchesSearchQuery, useStore } from './store'
+import { cleanStaleAgentInputDrafts, clearFailedTasks, deleteAgentRoundFromConversation, deleteFavoriteCollection, editOutputs, getActiveAgentRounds, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, markInterruptedOpenAIRunningTasks, migratePersistedState, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeTask, reuseConfig, retryTask, submitAgentMessage, submitTask, taskMatchesFilterStatus, taskMatchesSearchQuery, useStore } from './store'
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
 const imageB = { id: 'image-b', dataUrl: 'data:image/png;base64,b' }
@@ -293,6 +293,65 @@ describe('mask draft lifecycle in store actions', () => {
     const state = useStore.getState()
     expect(state.tasks).toHaveLength(1)
     expect(state.showToast).toHaveBeenCalledWith('任务已提交', 'success')
+  })
+
+  it('can clear the prompt while keeping reference images after submitting a gallery task', async () => {
+    useStore.setState({
+      prompt: 'already sent',
+      inputImages: [imageA],
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', clearReferenceImagesAfterSubmit: false },
+    })
+
+    await submitTask()
+
+    const state = useStore.getState()
+    expect(state.tasks[0].prompt).toBe('already sent')
+    expect(state.prompt).toBe('')
+    expect(state.inputImages).toEqual([imageA])
+  })
+
+  it('keeps the prompt when submit clearing is disabled', async () => {
+    useStore.setState({
+      prompt: 'keep me',
+      inputImages: [imageA],
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', clearInputAfterSubmit: false },
+    })
+
+    await submitTask()
+
+    const state = useStore.getState()
+    expect(state.tasks[0].prompt).toBe('keep me')
+    expect(state.prompt).toBe('keep me')
+    expect(state.inputImages).toEqual([])
+  })
+
+  it('retries a failed gallery task in place', async () => {
+    const failedTask = task({
+      id: 'failed-task',
+      prompt: 'retry me',
+      status: 'error',
+      error: 'previous failure',
+      outputImages: ['stale-output'],
+      outputErrors: [{ requestIndex: 0, error: 'previous failure' }],
+      finishedAt: 2,
+      elapsed: 1,
+    })
+    useStore.setState({ tasks: [failedTask] })
+
+    await retryTask(failedTask)
+
+    const state = useStore.getState()
+    expect(state.tasks).toHaveLength(1)
+    expect(state.tasks[0]).toMatchObject({
+      id: 'failed-task',
+      prompt: 'retry me',
+      status: 'running',
+      error: null,
+      outputImages: [],
+      outputErrors: undefined,
+      finishedAt: null,
+      elapsed: null,
+    })
   })
 
   it('stores decoded image size as actual size when the API omits size', async () => {
@@ -1225,6 +1284,25 @@ describe('agent draft lifecycle', () => {
     expect(state.maskDraft).toEqual(draftState.maskDraft)
     expect(state.maskEditorImageId).toBe(imageA.id)
     expect(state.agentEditingRoundId).toBeNull()
+  })
+
+  it('uses the Agent profile instead of the image active profile when entering Agent mode', () => {
+    const imageProfile = createDefaultFalProfile({ id: 'fal-image', apiKey: 'fal-key' })
+    useStore.setState({
+      appMode: 'gallery',
+      settings: normalizeSettings({
+        profiles: [imageProfile, responsesProfile],
+        activeProfileId: imageProfile.id,
+        agentProfileId: responsesProfile.id,
+      }),
+    })
+
+    useStore.getState().setAppMode('agent')
+
+    const state = useStore.getState()
+    expect(state.appMode).toBe('agent')
+    expect(state.settings.activeProfileId).toBe(imageProfile.id)
+    expect(state.settings.agentProfileId).toBe(responsesProfile.id)
   })
 
   it('keeps the gallery draft when switching into agent mode and back', () => {

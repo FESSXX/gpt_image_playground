@@ -1,8 +1,8 @@
 import { useRef, useEffect, useCallback, useState, useMemo, useLayoutEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ALL_FAVORITES_COLLECTION_ID, deleteFavoriteCollection, getTaskFavoriteCollectionIds, useStore, submitTask, submitAgentMessage, stopAgentResponse, addImageFromFile, createInputImageFromFile, deleteImageIfUnreferenced, removeMultipleTasks, getCachedImage, ensureImageCached, getActiveAgentRounds, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
+import { ALL_FAVORITES_COLLECTION_ID, deleteFavoriteCollection, getTaskFavoriteCollectionIds, useStore, submitTask, submitAgentMessage, stopAgentResponse, addImageFromFile, createInputImageFromFile, deleteImageIfUnreferenced, removeMultipleTasks, getCachedImage, ensureImageCached, getActiveAgentRounds, taskMatchesFilterStatus, taskMatchesSearchQuery, optimizePrompt } from '../store'
 import { DEFAULT_PARAMS, type TaskRecord } from '../types'
-import { getActiveApiProfile, normalizeSettings } from '../lib/apiProfiles'
+import { getActiveApiProfile, getAgentApiProfile, normalizeSettings } from '../lib/apiProfiles'
 import { DEFAULT_FAL_IMAGE_SIZE, getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { getAtImageQuery, getImageMentionLabel, getPromptIndexFromVisibleIndex, getPromptMentionParts, getSelectedImageMentionLabel, getSelectedTextMentionLabel, imageMentionMatches, insertImageMentionAtVisibleRange, insertTextMentionAtVisibleRange, isCursorInSelectedImageMention, stripImageMentionMarkers } from '../lib/promptImageMentions'
 import { normalizeImageSize } from '../lib/size'
@@ -432,6 +432,7 @@ export default function InputBar() {
   const prompt = useStore((s) => s.prompt)
   const appMode = useStore((s) => s.appMode)
   const setPrompt = useStore((s) => s.setPrompt)
+  const promptOptimizing = useStore((s) => s.promptOptimizing)
   const inputImages = useStore((s) => s.inputImages)
   const addInputImage = useStore((s) => s.addInputImage)
   const replaceInputImage = useStore((s) => s.replaceInputImage)
@@ -668,6 +669,7 @@ export default function InputBar() {
   const [isSingleLine, setIsSingleLine] = useState(true)
   const [submitHover, setSubmitHover] = useState(false)
   const [attachHover, setAttachHover] = useState(false)
+  const [optimizeHover, setOptimizeHover] = useState(false)
   const [imageHintId, setImageHintId] = useState<string | null>(null)
   const [mobileCollapsed, setMobileCollapsed] = useState(false)
   const [showSizePicker, setShowSizePicker] = useState(false)
@@ -735,11 +737,14 @@ export default function InputBar() {
   const isMobile = useIsMobile()
 
   const currentActiveProfile = useMemo(() => getActiveApiProfile(settings), [settings])
+  const currentAgentProfile = useMemo(() => getAgentApiProfile(settings), [settings])
   const activeProfile = useMemo(() => (
-    settings.reuseTaskApiProfileTemporarily && reusedTaskApiProfileId
+    appMode === 'agent'
+      ? currentAgentProfile
+      : settings.reuseTaskApiProfileTemporarily && reusedTaskApiProfileId
       ? settings.profiles.find((profile) => profile.id === reusedTaskApiProfileId) ?? currentActiveProfile
       : currentActiveProfile
-  ), [currentActiveProfile, reusedTaskApiProfileId, settings])
+  ), [appMode, currentActiveProfile, currentAgentProfile, reusedTaskApiProfileId, settings])
   const activeAgentConversation = appMode === 'agent'
     ? agentConversations.find((conversation) => conversation.id === activeAgentConversationId) ?? null
     : null
@@ -747,10 +752,18 @@ export default function InputBar() {
   const effectiveSettings = useMemo(() => (
     activeProfile.id === currentActiveProfile.id
       ? settings
-      : normalizeSettings({ ...settings, activeProfileId: activeProfile.id })
+      : normalizeSettings({ ...settings, activeProfileId: activeProfile.id, agentProfileId: activeProfile.id })
   ), [activeProfile.id, currentActiveProfile.id, settings])
   const hasSubmitApiConfig = Boolean(activeProfile.apiKey)
   const canSubmit = Boolean(prompt.trim() && hasSubmitApiConfig && !activeAgentIsRunning)
+  const canOptimizePrompt = Boolean(prompt.trim() && !promptOptimizing && !activeAgentIsRunning)
+  const optimizePromptTooltipText = promptOptimizing
+    ? '正在优化提示词'
+    : activeAgentIsRunning
+    ? '请先停止当前 Agent 请求'
+    : prompt.trim()
+    ? '优化提示词'
+    : '请输入提示词'
   const submitButtonAriaLabel = activeAgentIsRunning
     ? '停止生成'
     : hasSubmitApiConfig
@@ -798,18 +811,19 @@ export default function InputBar() {
   const displaySize = isFalTextToImage && params.size === 'auto'
     ? DEFAULT_FAL_IMAGE_SIZE
     : normalizeImageSize(params.size) || DEFAULT_PARAMS.size
+  const displaySizeLabel = displaySize === 'auto' ? '自动' : displaySize
 
   const qualityOptions = isFalProvider
     ? [
-        { label: 'low', value: 'low' },
-        { label: 'medium', value: 'medium' },
-        { label: 'high', value: 'high' },
+        { label: '低', value: 'low' },
+        { label: '中', value: 'medium' },
+        { label: '高', value: 'high' },
       ]
     : [
-        { label: 'auto', value: 'auto' },
-        { label: 'low', value: 'low' },
-        { label: 'medium', value: 'medium' },
-        { label: 'high', value: 'high' },
+        { label: '自动', value: 'auto' },
+        { label: '低', value: 'low' },
+        { label: '中', value: 'medium' },
+        { label: '高', value: 'high' },
       ]
   const atImageLimit = inputImages.length >= API_MAX_IMAGES
   const uploadImageTooltipText = atImageLimit ? `参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加` : '上传图片'
@@ -1580,7 +1594,10 @@ export default function InputBar() {
     }
   }, [])
 
-  const selectClass = 'px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] text-xs transition-all duration-200 shadow-sm'
+  const paramLabelClass = 'text-sm font-medium text-gray-400 dark:text-gray-500 ml-1'
+  const paramControlClass = 'px-4 py-2.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] text-sm leading-5 transition-all duration-200 shadow-sm'
+  const paramDisabledClass = 'px-4 py-2.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed text-sm leading-5 transition-all duration-200 shadow-sm'
+  const selectClass = paramControlClass
 
   const getTouchDropIndex = (touch: React.Touch) => {
     const target = document
@@ -1922,9 +1939,9 @@ export default function InputBar() {
   }
 
   const renderParams = (cols: string) => (
-    <div className={`grid ${cols} gap-2 text-xs flex-1`}>
+    <div className={`grid ${cols} gap-3 text-sm flex-1`}>
       <label
-        className="relative flex flex-col gap-0.5"
+        className="relative flex flex-col gap-1"
         onMouseEnter={sizeHint.show}
         onMouseLeave={sizeHint.hide}
         onTouchStart={sizeHint.startTouch}
@@ -1932,14 +1949,14 @@ export default function InputBar() {
         onTouchCancel={sizeHint.hide}
         onClick={sizeHint.show}
       >
-        <span className="text-gray-400 dark:text-gray-500 ml-1">尺寸</span>
+        <span className={paramLabelClass}>尺寸</span>
         <button
           type="button"
           onClick={() => { dismissAllTooltips(); setShowSizePicker(true) }}
-          className="px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] focus:outline-none text-xs text-left transition-all duration-200 shadow-sm font-mono"
+          className={`${paramControlClass} text-left focus:outline-none`}
           title="选择尺寸"
         >
-          {displaySize}
+          {displaySizeLabel}
         </button>
         <ButtonTooltip
           visible={isFalTextToImage && sizeHint.visible}
@@ -1947,7 +1964,7 @@ export default function InputBar() {
         />
       </label>
       <label
-        className="relative flex flex-col gap-0.5"
+        className="relative flex flex-col gap-1"
         onMouseEnter={qualityHint.show}
         onMouseLeave={qualityHint.hide}
         onTouchStart={qualityHint.startTouch}
@@ -1955,7 +1972,7 @@ export default function InputBar() {
         onTouchCancel={qualityHint.hide}
         onClick={qualityHint.show}
       >
-        <span className="text-gray-400 dark:text-gray-500 ml-1">质量</span>
+        <span className={paramLabelClass}>质量</span>
         <Select
           value={settings.codexCli ? 'auto' : isFalProvider && params.quality === 'auto' ? 'high' : params.quality}
           onChange={(val) => {
@@ -1964,7 +1981,7 @@ export default function InputBar() {
           options={qualityOptions}
           disabled={settings.codexCli}
           className={settings.codexCli
-            ? 'px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed text-xs transition-all duration-200 shadow-sm'
+            ? paramDisabledClass
             : selectClass}
         />
         <ButtonTooltip
@@ -1972,8 +1989,8 @@ export default function InputBar() {
           text={isFalProvider ? <>fal.ai 不支持 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">auto</code> 质量参数</> : 'Codex CLI 不支持质量参数'}
         />
       </label>
-      <label className="flex flex-col gap-0.5">
-        <span className="text-gray-400 dark:text-gray-500 ml-1">格式</span>
+      <label className="flex flex-col gap-1">
+        <span className={paramLabelClass}>格式</span>
         <Select
           value={params.output_format}
           onChange={(val) => {
@@ -1992,7 +2009,7 @@ export default function InputBar() {
       </label>
       {showTransparentOutputControl ? (
         <label
-          className="relative flex flex-col gap-0.5"
+          className="relative flex flex-col gap-1"
           onMouseEnter={transparentOutputHint.show}
           onMouseLeave={transparentOutputHint.hide}
           onTouchStart={transparentOutputHint.startTouch}
@@ -2000,7 +2017,7 @@ export default function InputBar() {
           onTouchCancel={transparentOutputHint.hide}
           onClick={transparentOutputHint.show}
         >
-          <span className="text-gray-400 dark:text-gray-500 ml-1">透明背景</span>
+          <span className={paramLabelClass}>透明背景</span>
           <Select
             value={transparentOutputEnabled ? 'on' : 'off'}
             onChange={(val) => {
@@ -2008,8 +2025,8 @@ export default function InputBar() {
               setParams({ transparent_output: val === 'on', output_compression: null })
             }}
             options={[
-              { label: 'false', value: 'off' },
-              { label: 'true', value: 'on' },
+              { label: '关闭', value: 'off' },
+              { label: '开启', value: 'on' },
             ]}
             className={selectClass}
             onOpenChange={handleTransparentOutputMenuOpenChange}
@@ -2021,7 +2038,7 @@ export default function InputBar() {
         </label>
       ) : (
         <label
-          className="relative flex flex-col gap-0.5"
+          className="relative flex flex-col gap-1"
           onMouseEnter={compressionHint.show}
           onMouseLeave={compressionHint.hide}
           onTouchStart={compressionHint.startTouch}
@@ -2029,7 +2046,7 @@ export default function InputBar() {
           onTouchCancel={compressionHint.hide}
           onClick={compressionHint.show}
         >
-          <span className="text-gray-400 dark:text-gray-500 ml-1">压缩率</span>
+          <span className={paramLabelClass}>压缩率</span>
           <input
             value={outputCompressionInput}
             onChange={(e) => setOutputCompressionInput(e.target.value)}
@@ -2039,10 +2056,10 @@ export default function InputBar() {
             min={0}
             max={100}
             placeholder="0-100"
-            className={`px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] focus:outline-none text-xs transition-all duration-200 shadow-sm ${
+            className={`${paramControlClass} focus:outline-none ${
               compressionDisabled
-                ? 'bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed'
-                : 'bg-white/50 dark:bg-white/[0.03]'
+                ? '!bg-gray-100/50 dark:!bg-white/[0.05] opacity-50 cursor-not-allowed'
+                : ''
               }`}
           />
           <ButtonTooltip
@@ -2052,7 +2069,7 @@ export default function InputBar() {
         </label>
       )}
       <label
-        className="relative flex flex-col gap-0.5"
+        className="relative flex flex-col gap-1"
         onMouseEnter={moderationHint.show}
         onMouseLeave={moderationHint.hide}
         onTouchStart={moderationHint.startTouch}
@@ -2060,19 +2077,19 @@ export default function InputBar() {
         onTouchCancel={moderationHint.hide}
         onClick={moderationHint.show}
       >
-        <span className="text-gray-400 dark:text-gray-500 ml-1">审核</span>
+        <span className={paramLabelClass}>审核</span>
         <Select
           value={moderationDisabled ? 'auto' : params.moderation}
           onChange={(val) => {
             if (!moderationDisabled) setParams({ moderation: val as any })
           }}
           options={[
-            { label: 'auto', value: 'auto' },
-            { label: 'low', value: 'low' },
+            { label: '自动', value: 'auto' },
+            { label: '低', value: 'low' },
           ]}
           disabled={moderationDisabled}
           className={moderationDisabled
-            ? 'px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed text-xs transition-all duration-200 shadow-sm'
+            ? paramDisabledClass
             : selectClass}
         />
         <ButtonTooltip
@@ -2081,7 +2098,7 @@ export default function InputBar() {
         />
       </label>
       <label
-        className="relative flex flex-col gap-0.5"
+        className="relative flex flex-col gap-1"
         onMouseEnter={showAgentNHint}
         onMouseLeave={hideNLimitHint}
         onTouchStart={startAgentNHintTouch}
@@ -2092,7 +2109,7 @@ export default function InputBar() {
         }}
         onClick={showAgentNHint}
       >
-        <span className="text-gray-400 dark:text-gray-500 ml-1">数量</span>
+        <span className={paramLabelClass}>数量</span>
         <input
           value={nInput}
           onChange={(e) => handleNInputChange(e.target.value)}
@@ -2115,10 +2132,10 @@ export default function InputBar() {
           type={agentAutoImageCount ? 'text' : 'number'}
           min={agentAutoImageCount ? undefined : 1}
           max={agentAutoImageCount ? undefined : outputImageLimit}
-          className={`px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] focus:outline-none text-xs transition-all duration-200 shadow-sm ${
+          className={`${paramControlClass} focus:outline-none ${
             agentAutoImageCount
-              ? 'bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed'
-              : 'bg-white/50 dark:bg-white/[0.03]'
+              ? '!bg-gray-100/50 dark:!bg-white/[0.05] opacity-50 cursor-not-allowed'
+              : ''
           }`}
         />
         <ButtonTooltip visible={nLimitHint.visible} text={nLimitHintText} />
@@ -2466,6 +2483,31 @@ export default function InputBar() {
                 </div>
                 <div
                   className="relative"
+                  onMouseEnter={() => setOptimizeHover(true)}
+                  onMouseLeave={() => setOptimizeHover(false)}
+                >
+                  <ButtonTooltip visible={optimizeHover} text={optimizePromptTooltipText} />
+                  <button
+                    onClick={() => void optimizePrompt()}
+                    disabled={!canOptimizePrompt}
+                    className="p-2.5 rounded-xl transition-all shadow-sm bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 hover:shadow disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-200 dark:disabled:hover:bg-white/[0.06]"
+                    aria-label="优化提示词"
+                  >
+                    {promptOptimizing ? (
+                      <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" />
+                        <path className="opacity-75" fill="currentColor" d="M21 12a9 9 0 00-9-9v3a6 6 0 016 6h3z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                        <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z" />
+                        <path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                <div
+                  className="relative"
                   onMouseEnter={() => setSubmitHover(true)}
                   onMouseLeave={() => setSubmitHover(false)}
                 >
@@ -2570,6 +2612,31 @@ export default function InputBar() {
                       </div>
                     </>
                   )}
+                </div>
+                <div
+                  className="relative"
+                  onMouseEnter={() => setOptimizeHover(true)}
+                  onMouseLeave={() => setOptimizeHover(false)}
+                >
+                  <ButtonTooltip visible={optimizeHover} text={optimizePromptTooltipText} />
+                  <button
+                    onClick={() => void optimizePrompt()}
+                    disabled={!canOptimizePrompt}
+                    className="p-2.5 rounded-xl transition-all shadow-sm flex-shrink-0 bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-200 dark:disabled:hover:bg-white/[0.06]"
+                    aria-label="优化提示词"
+                  >
+                    {promptOptimizing ? (
+                      <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" />
+                        <path className="opacity-75" fill="currentColor" d="M21 12a9 9 0 00-9-9v3a6 6 0 016 6h3z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                        <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z" />
+                        <path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z" />
+                      </svg>
+                    )}
+                  </button>
                 </div>
                 <div
                   className="relative flex-1"

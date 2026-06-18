@@ -509,6 +509,13 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     ? record.activeProfileId
     : profiles[0].id
   const active = profiles.find((p) => p.id === activeProfileId) ?? profiles[0]
+  const savedAgentProfileId = typeof record.agentProfileId === 'string' && profiles.some((p) => p.id === record.agentProfileId)
+    ? record.agentProfileId
+    : null
+  const agentProfileId = savedAgentProfileId
+    ?? (active.provider === 'openai' && active.apiMode === 'responses'
+      ? active.id
+      : profiles.find((p) => p.provider === 'openai' && p.apiMode === 'responses')?.id ?? activeProfileId)
 
   return {
     baseUrl: active.baseUrl,
@@ -522,7 +529,10 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     streamPartialImages: active.streamPartialImages,
     customProviders,
     providerOrder: Array.isArray(record.providerOrder) ? record.providerOrder.map(String) : undefined,
-    clearInputAfterSubmit: typeof record.clearInputAfterSubmit === 'boolean' ? record.clearInputAfterSubmit : false,
+    clearInputAfterSubmit: typeof record.clearInputAfterSubmit === 'boolean' ? record.clearInputAfterSubmit : true,
+    clearReferenceImagesAfterSubmit: typeof record.clearReferenceImagesAfterSubmit === 'boolean'
+      ? record.clearReferenceImagesAfterSubmit
+      : typeof record.clearInputAfterSubmit === 'boolean' ? record.clearInputAfterSubmit : true,
     persistInputOnRestart: typeof record.persistInputOnRestart === 'boolean' ? record.persistInputOnRestart : true,
     reuseTaskApiProfileTemporarily: typeof record.reuseTaskApiProfileTemporarily === 'boolean' ? record.reuseTaskApiProfileTemporarily : false,
     alwaysShowRetryButton: typeof record.alwaysShowRetryButton === 'boolean' ? record.alwaysShowRetryButton : false,
@@ -536,6 +546,7 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     agentMathFormattingPrompt: typeof record.agentMathFormattingPrompt === 'boolean' ? record.agentMathFormattingPrompt : true,
     profiles,
     activeProfileId,
+    agentProfileId,
   }
 }
 
@@ -634,6 +645,11 @@ export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): A
     streamImages: profile.provider === 'openai' && typeof record.streamImages === 'boolean' ? record.streamImages : profile.streamImages,
     streamPartialImages: normalizeStreamPartialImages(record.streamPartialImages, profile.streamPartialImages),
   }
+}
+
+export function getAgentApiProfile(settings: Partial<AppSettings> | unknown): ApiProfile {
+  const normalized = normalizeSettings(settings)
+  return normalized.profiles.find((p) => p.id === normalized.agentProfileId) ?? getActiveApiProfile(normalized)
 }
 
 export function validateApiProfile(profile: ApiProfile): string | null {
@@ -814,7 +830,8 @@ export const DEFAULT_SETTINGS: AppSettings = normalizeSettings({
   streamImages: false,
   streamPartialImages: DEFAULT_STREAM_PARTIAL_IMAGES,
   customProviders: [],
-  clearInputAfterSubmit: false,
+  clearInputAfterSubmit: true,
+  clearReferenceImagesAfterSubmit: true,
   persistInputOnRestart: true,
   reuseTaskApiProfileTemporarily: false,
   alwaysShowRetryButton: false,

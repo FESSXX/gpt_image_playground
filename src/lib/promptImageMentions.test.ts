@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { InputImage } from '../types'
-import { getAtImageQuery, getPromptMentionParts, getSelectedImageMentionLabel, getSelectedTextMentionLabel, insertImageMention, insertTextMentionAtVisibleRange, isCursorInSelectedImageMention, remapImageMentionsForOrder, replaceImageMentionsForApi } from './promptImageMentions'
+import { getAtImageQuery, getPromptMentionParts, getSelectedImageMentionLabel, getSelectedTextMentionLabel, insertImageMention, insertTextMentionAtVisibleRange, isCursorInSelectedImageMention, remapImageMentionsForOrder, replaceImageMentionsForApi, restorePromptMentionMarkers } from './promptImageMentions'
 
 const images: InputImage[] = [
   { id: 'image-a', dataUrl: 'data:image/png;base64,a' },
@@ -126,6 +126,16 @@ describe('prompt image mentions', () => {
 
     it('does not replace mentions outside the current image range', () => {
       expect(replaceImageMentionsForApi(`把 ${getSelectedImageMentionLabel(2)} 变蓝`, 2)).toBe('把 @图3 变蓝')
+    })
+  })
+
+  describe('restorePromptMentionMarkers', () => {
+    it('restores visible current image mentions into selected mentions', () => {
+      expect(restorePromptMentionMarkers('参考 @图2 生成，保留 @图9', images.length)).toBe(`参考 ${getSelectedImageMentionLabel(1)} 生成，保留 @图9`)
+    })
+
+    it('restores visible agent round image mentions into selected mentions', () => {
+      expect(restorePromptMentionMarkers('参考 @第1轮图2 和 @2轮图1', images.length)).toBe(`参考 ${getSelectedTextMentionLabel('@第1轮图2')} 和 ${getSelectedTextMentionLabel('@2轮图1')}`)
     })
   })
 })

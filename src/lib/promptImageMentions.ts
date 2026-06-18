@@ -4,6 +4,7 @@ const MENTION_START = '\u2063'
 const MENTION_END = '\u2064'
 const SELECTED_IMAGE_MENTION_RE = /\u2063@图(\d+)\u2064/g
 const SELECTED_MENTION_RE = /\u2063(@图(\d+)|@(?:第)?\d+轮图\d+)\u2064/g
+const VISIBLE_MENTION_RE = /@图(\d+)|@(?:第)?\d+轮图\d+/g
 
 export interface AtImageQuery {
   start: number
@@ -143,5 +144,13 @@ export function replaceImageMentionsForApi(prompt: string, imageCount?: number, 
     const index = Number(n) - 1
     if (imageCount != null && (index < 0 || index >= imageCount)) return stripImageMentionMarkers(text)
     return formatImage ? formatImage(index) : `[image ${n}]`
+  })
+}
+
+export function restorePromptMentionMarkers(prompt: string, imageCount: number): string {
+  return stripImageMentionMarkers(prompt).replace(VISIBLE_MENTION_RE, (text, imageNumber) => {
+    if (!imageNumber) return getSelectedTextMentionLabel(text)
+    const index = Number(imageNumber) - 1
+    return index >= 0 && index < imageCount ? getSelectedImageMentionLabel(index) : text
   })
 }

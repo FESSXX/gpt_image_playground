@@ -8,6 +8,7 @@ import {
   createDefaultOpenAIProfile,
   createDefaultFalProfile,
   getActiveApiProfile,
+  getAgentApiProfile,
   findEquivalentApiProfile,
   importCustomProviderDefinitionFromJson,
   importCustomProviderSettingsFromJson,
@@ -585,6 +586,41 @@ describe('custom providers', () => {
     expect(clamped.profiles[0].streamPartialImages).toBe(3)
   })
 
+  it('keeps an independent Agent profile selection', () => {
+    const imageProfile = createDefaultFalProfile({ id: 'image-profile', apiKey: 'fal-key' })
+    const agentProfile = createDefaultOpenAIProfile({
+      id: 'agent-profile',
+      apiKey: 'openai-key',
+      apiMode: 'responses',
+    })
+    const settings = normalizeSettings({
+      profiles: [imageProfile, agentProfile],
+      activeProfileId: imageProfile.id,
+    })
+
+    expect(settings.activeProfileId).toBe(imageProfile.id)
+    expect(settings.agentProfileId).toBe(agentProfile.id)
+    expect(getActiveApiProfile(settings).id).toBe(imageProfile.id)
+    expect(getAgentApiProfile(settings).id).toBe(agentProfile.id)
+  })
+
+  it('preserves a saved Agent profile id when the image profile changes', () => {
+    const imageProfile = createDefaultOpenAIProfile({ id: 'image-profile', apiKey: 'image-key' })
+    const agentProfile = createDefaultOpenAIProfile({
+      id: 'agent-profile',
+      apiKey: 'agent-key',
+      apiMode: 'responses',
+    })
+    const settings = normalizeSettings({
+      profiles: [imageProfile, agentProfile],
+      activeProfileId: imageProfile.id,
+      agentProfileId: agentProfile.id,
+    })
+
+    expect(settings.activeProfileId).toBe(imageProfile.id)
+    expect(settings.agentProfileId).toBe(agentProfile.id)
+  })
+
   it('normalizes custom providers to Images API mode', () => {
     const settings = normalizeSettings({
       customProviders: [{ id: 'custom-json', name: 'Custom JSON', submit: { path: 'images/generations' } }],
@@ -642,6 +678,16 @@ describe('custom providers', () => {
     expect(DEFAULT_SETTINGS.agentScrollToBottomAfterSubmit).toBe(true)
     expect(normalizeSettings({}).agentScrollToBottomAfterSubmit).toBe(true)
     expect(normalizeSettings({ agentScrollToBottomAfterSubmit: false }).agentScrollToBottomAfterSubmit).toBe(false)
+  })
+
+  it('clears input after submit by default', () => {
+    expect(DEFAULT_SETTINGS.clearInputAfterSubmit).toBe(true)
+    expect(DEFAULT_SETTINGS.clearReferenceImagesAfterSubmit).toBe(true)
+    expect(normalizeSettings({}).clearInputAfterSubmit).toBe(true)
+    expect(normalizeSettings({}).clearReferenceImagesAfterSubmit).toBe(true)
+    expect(normalizeSettings({ clearInputAfterSubmit: false }).clearInputAfterSubmit).toBe(false)
+    expect(normalizeSettings({ clearReferenceImagesAfterSubmit: false }).clearReferenceImagesAfterSubmit).toBe(false)
+    expect(normalizeSettings({ clearInputAfterSubmit: false }).clearReferenceImagesAfterSubmit).toBe(false)
   })
 
   it('enables Agent math formatting prompt by default', () => {

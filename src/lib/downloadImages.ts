@@ -1,6 +1,7 @@
 import { ensureImageCached } from '../store'
 import { zipSync } from 'fflate'
 import type { TaskRecord } from '../types'
+import { isHttpUrl } from './imageApiShared'
 
 const MIME_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
@@ -35,12 +36,17 @@ export async function downloadImageIds(imageIds: string[], fileNameBase = 'image
 
   for (let index = 0; index < imageIds.length; index++) {
     try {
-      const blob = await getImageBlob(imageIds[index])
       const order = String(index + 1).padStart(2, '0')
-      const fileName = multiple
-        ? `${fileNameBase}-${order}.${getBlobExtension(blob)}`
-        : `${fileNameBase}.${getBlobExtension(blob)}`
-      triggerDownload(blob, fileName)
+      const imageId = imageIds[index]
+      if (isHttpUrl(imageId)) {
+        triggerUrlDownload(imageId, multiple ? `${fileNameBase}-${order}` : fileNameBase)
+      } else {
+        const blob = await getImageBlob(imageId)
+        const fileName = multiple
+          ? `${fileNameBase}-${order}.${getBlobExtension(blob)}`
+          : `${fileNameBase}.${getBlobExtension(blob)}`
+        triggerDownload(blob, fileName)
+      }
       successCount++
       if (multiple) await delay(100)
     } catch (err) {
@@ -127,6 +133,16 @@ function triggerDownload(blob: Blob, fileName: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
+function triggerUrlDownload(url: string, fileName: string) {
+  const a = document.createElement('a')
+  a.href = url
+  a.download = sanitizeFileNamePart(fileName) || 'image'
+  a.rel = 'noopener noreferrer'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+}
+
 function getBlobExtension(blob: Blob): string {
   return MIME_EXTENSIONS[blob.type.toLowerCase()] ?? blob.type.split('/')[1] ?? 'png'
 }
@@ -138,4 +154,3 @@ function sanitizeFileNamePart(value: string): string {
 function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
-

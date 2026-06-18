@@ -86,6 +86,16 @@ const AGENT_TITLE_INSTRUCTIONS = [
 
 const AGENT_TITLE_MAX_LENGTH = 28
 
+const PROMPT_OPTIMIZATION_INSTRUCTIONS = [
+  'You optimize prompts for an image-generation app.',
+  'Rewrite the user prompt with medium enhancement: add useful subject, style, composition, lighting, material, background, and camera details.',
+  'Preserve the user\'s core intent and original language. Chinese stays Chinese, English stays English, mixed-language prompts keep their mixed structure when possible.',
+  'Do not add unrelated subjects, claims, or constraints.',
+  'If the prompt references images using labels like @图1 or @第1轮图2, keep those labels exactly when still relevant.',
+  'Use attached images only to understand referenced visual style, subject, composition, or details.',
+  'Output only the optimized prompt text. Do not use markdown, bullets, explanations, quotes, or code fences.',
+].join('\n')
+
 function createHeaders(profile: ApiProfile): Record<string, string> {
   return {
     Authorization: `Bearer ${profile.apiKey}`,
@@ -757,6 +767,60 @@ export async function callAgentConversationTitleApi(opts: {
 
     const payload = await response.json() as ResponsesApiResponse
     return parseAgentConversationTitleXml(extractText(payload))
+  } finally {
+    clearTimeout(timeoutId)
+    signal?.removeEventListener('abort', abortFromCaller)
+  }
+}
+
+export async function callPromptOptimizationApi(opts: {
+  settings: AppSettings
+  profile: ApiProfile
+  prompt: string
+  referenceImageDataUrls?: string[]
+  referenceLabels?: string[]
+  signal?: AbortSignal
+}): Promise<string> {
+  const { settings, profile, prompt, referenceImageDataUrls = [], referenceLabels = [], signal } = opts
+  const proxyConfig = readClientDevProxyConfig()
+  const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
+  const abortFromCaller = () => controller.abort()
+  if (signal?.aborted) controller.abort()
+  signal?.addEventListener('abort', abortFromCaller, { once: true })
+
+  try {
+    const labelText = referenceLabels.length
+      ? `Reference image labels, in attached image order: ${referenceLabels.join(', ')}.`
+      : ''
+    const content: Array<Record<string, string>> = [
+      { type: 'input_text', text: [labelText, `Prompt to optimize:\n${prompt}`].filter(Boolean).join('\n\n') },
+    ]
+    for (const dataUrl of referenceImageDataUrls) {
+      content.push({ type: 'input_image', image_url: dataUrl })
+    }
+
+    const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
+      method: 'POST',
+      headers: createHeaders(profile),
+      cache: 'no-store',
+      body: JSON.stringify({
+        model: profile.model || settings.model,
+        instructions: PROMPT_OPTIMIZATION_INSTRUCTIONS,
+        input: [{ role: 'user', content }],
+      }),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      throw new Error(await getApiErrorMessage(response))
+    }
+
+    const payload = await response.json() as ResponsesApiResponse
+    const optimized = extractText(payload).trim()
+    if (!optimized) throw new Error('接口未返回优化后的提示词')
+    return optimized
   } finally {
     clearTimeout(timeoutId)
     signal?.removeEventListener('abort', abortFromCaller)

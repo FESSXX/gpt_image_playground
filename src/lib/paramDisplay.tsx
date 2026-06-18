@@ -17,6 +17,14 @@ interface ActualValueBadgeProps {
   variant?: 'highlight' | 'normal'
 }
 
+export function getParamDisplayLabel(paramKey: ParamKey, value: string) {
+  if (value === 'auto') return '自动'
+  if (paramKey === 'quality') return ({ low: '低', medium: '中', high: '高' } as Record<string, string>)[value] ?? value
+  if (paramKey === 'moderation') return value === 'low' ? '低' : value
+  if (paramKey === 'output_format') return ({ png: 'PNG', jpeg: 'JPEG', webp: 'WebP' } as Record<string, string>)[value] ?? value
+  return value
+}
+
 export function ActualValueBadge({ value, className = '', variant = 'highlight' }: ActualValueBadgeProps) {
   const [tooltipVisible, setTooltipVisible] = useState(false)
   const touchTimerRef = useRef<number | null>(null)
@@ -76,9 +84,9 @@ export function getParamDisplay(task: TaskRecord, paramKey: ParamKey, actualPara
     String(actualValue) !== String(requestedValue)
 
   return {
-    displayValue: String(displayValue),
+    displayValue: getParamDisplayLabel(paramKey, String(displayValue)),
     isMismatch,
-    requestedValue: String(requestedValue),
+    requestedValue: getParamDisplayLabel(paramKey, String(requestedValue)),
     isAutoResolved: hasActualValue && requestedValue === 'auto' && String(actualValue) !== String(requestedValue),
   }
 }

@@ -18,9 +18,9 @@ import type {
   ResponsesOutputItem,
 } from './types'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_PARAMS } from './types'
-import { DEFAULT_SETTINGS, getActiveApiProfile, getCustomProviderDefinition, mergeImportedSettings, normalizeSettings, validateApiProfile } from './lib/apiProfiles'
+import { DEFAULT_SETTINGS, getActiveApiProfile, getAgentApiProfile, getCustomProviderDefinition, mergeImportedSettings, normalizeSettings, validateApiProfile } from './lib/apiProfiles'
 import { dismissAllTooltips } from './lib/tooltipDismiss'
-import { remapImageMentionsForOrder, replaceImageMentionsForApi } from './lib/promptImageMentions'
+import { getImageMentionLabel, remapImageMentionsForOrder, replaceImageMentionsForApi, restorePromptMentionMarkers, stripImageMentionMarkers } from './lib/promptImageMentions'
 import {
   CURRENT_THUMBNAIL_VERSION,
   getAllTasks,
@@ -43,8 +43,8 @@ import {
   storeImageWithSize,
 } from './lib/db'
 import { callImageApi } from './lib/api'
-import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSingle, parseBatchImageCallArguments, type AgentApiResultImage } from './lib/agentApi'
-import { collectAgentRoundOutputImageSlots, extractAgentReferenceIds, getAgentCurrentReferenceId, getAgentGeneratedImageReferenceId, replaceAgentPromptImageReferencesForApi } from './lib/agentImageReferences'
+import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSingle, callPromptOptimizationApi, parseBatchImageCallArguments, type AgentApiResultImage } from './lib/agentApi'
+import { collectAgentRoundOutputImageSlots, extractAgentReferenceIds, getAgentCurrentReferenceId, getAgentGeneratedImageReferenceId, replaceAgentPromptImageReferencesForApi, resolveAgentPromptImageReferenceEntries } from './lib/agentImageReferences'
 import { showBrowserNotification } from './lib/browserNotification'
 import { IMAGE_FETCH_CORS_HINT } from './lib/imageApiShared'
 import { getFalErrorMessage, getFalQueuedImageResult } from './lib/falAiImageApi'
@@ -793,6 +793,8 @@ interface AppState {
   // 输入
   prompt: string
   setPrompt: (p: string) => void
+  promptOptimizing: boolean
+  optimizePrompt: () => Promise<void>
   inputImages: InputImage[]
   addInputImage: (img: InputImage) => void
   replaceInputImage: (idx: number, img: InputImage) => void
@@ -1167,7 +1169,7 @@ export const useStore = create<AppState>()(
 
         const state = get()
         const settings = normalizeSettings(state.settings)
-        const activeProfile = getActiveApiProfile(settings)
+        const activeProfile = getAgentApiProfile(settings)
 
         if (activeProfile.provider === 'openai' && activeProfile.apiMode === 'responses') {
           const galleryInputDraft = saveGalleryInputDraft(state)
@@ -1187,11 +1189,11 @@ export const useStore = create<AppState>()(
         if (activeProfile.provider === 'openai' && activeProfile.apiMode !== 'responses') {
           state.setConfirmDialog({
             title: '需要 Responses API 配置',
-            message: `当前配置「${activeProfile.name}」使用的是 Images API，仅支持生成图片，无 Agent 模式需要的对话能力。\n\n请前往 API 配置页，将当前配置调整为 Responses API，或切换/新建一个支持 Responses API 的配置。`,
+            message: `当前 Agent 配置「${activeProfile.name}」使用的是 Images API，仅支持生成图片，无 Agent 模式需要的对话能力。\n\n请前往 Agent 配置页，切换或新建一个支持 Responses API 的配置。`,
             confirmText: '去设置',
             cancelText: '取消',
             action: () => {
-              useStore.getState().setShowSettings(true, 'api')
+              useStore.getState().setShowSettings(true, 'agent')
             },
           })
           return
@@ -1199,11 +1201,11 @@ export const useStore = create<AppState>()(
 
         state.setConfirmDialog({
           title: '配置不支持 Agent 模式',
-          message: `当前配置「${activeProfile.name}」所属的服务商暂不支持 Agent 模式。Agent 模式需要使用支持 Responses API 的 OpenAI 配置。\n\n请前往 API 配置页，切换或新建一个支持 Responses API 的配置。`,
+          message: `当前 Agent 配置「${activeProfile.name}」所属的服务商暂不支持 Agent 模式。Agent 模式需要使用支持 Responses API 的 OpenAI 配置。\n\n请前往 Agent 配置页，切换或新建一个支持 Responses API 的配置。`,
           confirmText: '去设置',
           cancelText: '取消',
           action: () => {
-            useStore.getState().setShowSettings(true, 'api')
+            useStore.getState().setShowSettings(true, 'agent')
           },
         })
       },
@@ -1261,6 +1263,8 @@ export const useStore = create<AppState>()(
       // Input
       prompt: '',
       setPrompt: (prompt) => set((s) => syncActiveInputDraft(s, { prompt })),
+      promptOptimizing: false,
+      optimizePrompt: () => optimizePrompt(),
       inputImages: [],
       addInputImage: (img) =>
         set((s) => {
@@ -2282,6 +2286,81 @@ export async function initStore() {
   }
 }
 
+async function readPromptOptimizationReferences(state: AppState, visiblePrompt: string) {
+  const labels: string[] = []
+  const dataUrls: string[] = []
+
+  const addReference = async (label: string, imageId: string, fallbackDataUrl?: string) => {
+    const dataUrl = fallbackDataUrl || await ensureImageCached(imageId)
+    if (!dataUrl) return
+    labels.push(label)
+    dataUrls.push(dataUrl)
+  }
+
+  for (let i = 0; i < state.inputImages.length; i += 1) {
+    const image = state.inputImages[i]
+    if (image) await addReference(getImageMentionLabel(i), image.id, image.dataUrl)
+  }
+
+  if (state.appMode === 'agent' && state.activeAgentConversationId) {
+    const conversation = state.agentConversations.find((item) => item.id === state.activeAgentConversationId)
+    if (conversation) {
+      const rounds = getActiveAgentRounds(conversation)
+      for (const entry of resolveAgentPromptImageReferenceEntries(visiblePrompt, rounds, state.tasks)) {
+        await addReference(entry.label, entry.imageId)
+      }
+    }
+  }
+
+  return { labels, dataUrls }
+}
+
+export async function optimizePrompt() {
+  const state = useStore.getState()
+  if (state.promptOptimizing) return
+
+  const trimmedPrompt = state.prompt.trim()
+  if (!trimmedPrompt) {
+    state.showToast('请输入提示词', 'error')
+    return
+  }
+
+  const settings = normalizeSettings(state.settings)
+  const activeProfile = getAgentApiProfile(settings)
+  if (activeProfile.provider !== 'openai' || activeProfile.apiMode !== 'responses') {
+    state.showToast('提示词优化需要使用 OpenAI 兼容的 Responses API 配置', 'error')
+    state.setShowSettings(true, 'agent')
+    return
+  }
+
+  const profileError = validateApiProfile(activeProfile)
+  if (profileError) {
+    state.showToast(`请先完善请求 API 配置：${profileError}`, 'error')
+    state.setShowSettings(true, 'agent')
+    return
+  }
+
+  useStore.setState({ promptOptimizing: true })
+  try {
+    const latest = useStore.getState()
+    const visiblePrompt = stripImageMentionMarkers(latest.prompt.trim())
+    const references = await readPromptOptimizationReferences(latest, visiblePrompt)
+    const optimized = await callPromptOptimizationApi({
+      settings: createSettingsForApiProfile(settings, activeProfile),
+      profile: activeProfile,
+      prompt: visiblePrompt,
+      referenceImageDataUrls: references.dataUrls,
+      referenceLabels: references.labels,
+    })
+    useStore.getState().setPrompt(restorePromptMentionMarkers(optimized, latest.inputImages.length))
+    useStore.getState().showToast('提示词已优化', 'success')
+  } catch (err) {
+    useStore.getState().showToast(`提示词优化失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+  } finally {
+    useStore.setState({ promptOptimizing: false })
+  }
+}
+
 /** 提交新任务 */
 export async function submitTask(options: { allowFullMask?: boolean; useCurrentApiProfileWhenReusedMissing?: boolean } = {}) {
   const { settings, prompt, inputImages, maskDraft, params, reusedTaskApiProfileId, reusedTaskApiProfileName, reusedTaskApiProfileMissing, showToast, setConfirmDialog } =
@@ -2404,6 +2483,8 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
 
   if (settings.clearInputAfterSubmit) {
     useStore.getState().setPrompt('')
+  }
+  if (settings.clearReferenceImagesAfterSubmit) {
     useStore.getState().clearInputImages()
   }
   useStore.getState().setReusedTaskApiProfile(null)
@@ -3194,7 +3275,7 @@ export async function submitAgentMessage() {
   const state = useStore.getState()
   const { settings, prompt, inputImages, maskDraft, params, showToast } = state
   const normalizedSettings = normalizeSettings(settings)
-  const activeProfile = getActiveApiProfile(normalizedSettings)
+  const activeProfile = getAgentApiProfile(normalizedSettings)
 
   if (activeProfile.provider !== 'openai' || activeProfile.apiMode !== 'responses') {
     state.setAppMode('agent')
@@ -3203,7 +3284,7 @@ export async function submitAgentMessage() {
 
   if (validateApiProfile(activeProfile)) {
     showToast(`请先完善请求 API 配置：${validateApiProfile(activeProfile)}`, 'error')
-    state.setShowSettings(true)
+    state.setShowSettings(true, 'agent')
     return
   }
 
@@ -3329,8 +3410,8 @@ export async function submitAgentMessage() {
     }
   })
 
-  state.setPrompt('')
-  state.clearInputImages()
+  if (normalizedSettings.clearInputAfterSubmit) state.setPrompt('')
+  if (normalizedSettings.clearReferenceImagesAfterSubmit) state.clearInputImages()
   state.clearMaskDraft()
   state.setAgentEditingRoundId(null)
 
@@ -3345,7 +3426,7 @@ export async function regenerateAgentAssistantMessage(conversationId: string, ro
   const state = useStore.getState()
   const { settings, params, showToast } = state
   const normalizedSettings = normalizeSettings(settings)
-  const activeProfile = getActiveApiProfile(normalizedSettings)
+  const activeProfile = getAgentApiProfile(normalizedSettings)
 
   if (activeProfile.provider !== 'openai' || activeProfile.apiMode !== 'responses') {
     state.setAppMode('agent')
@@ -3354,7 +3435,7 @@ export async function regenerateAgentAssistantMessage(conversationId: string, ro
 
   if (validateApiProfile(activeProfile)) {
     showToast(`请先完善请求 API 配置：${validateApiProfile(activeProfile)}`, 'error')
-    state.setShowSettings(true)
+    state.setShowSettings(true, 'agent')
     return
   }
 
@@ -4523,7 +4604,7 @@ export async function deleteFavoriteCollection(collectionId: string, deleteTasks
   useStore.getState().showToast(`已删除收藏夹「${collection.name}」`, 'success')
 }
 
-/** 重试失败的任务：创建新任务并执行 */
+/** 重试任务：失败任务原地重跑，成功任务创建新任务 */
 export async function retryTask(task: TaskRecord) {
   const { settings } = useStore.getState()
   const activeProfile = getActiveApiProfile(settings)
@@ -4535,6 +4616,41 @@ export async function retryTask(task: TaskRecord) {
   const transparentMeta = taskParams.transparent_output
     ? createTransparentOutputMeta(task.prompt.trim())
     : null
+  if (task.status === 'error') {
+    const now = Date.now()
+    updateTaskInStore(task.id, {
+      params: taskParams,
+      apiProvider: activeProfile.provider,
+      apiProfileId: activeProfile.id,
+      apiProfileName: activeProfile.name,
+      apiMode: activeProfile.apiMode,
+      apiModel: activeProfile.model,
+      inputImageIds: [...task.inputImageIds],
+      maskTargetImageId: task.maskTargetImageId ?? null,
+      maskImageId: task.maskImageId ?? null,
+      transparentOutput: transparentMeta?.transparentOutput,
+      transparentPrompt: transparentMeta?.effectivePrompt,
+      outputImages: [],
+      outputErrors: undefined,
+      actualParams: undefined,
+      actualParamsByImage: undefined,
+      revisedPromptByImage: undefined,
+      transparentOriginalImages: undefined,
+      streamPartialImageIds: undefined,
+      rawImageUrls: undefined,
+      rawResponsePayload: undefined,
+      status: 'running',
+      error: null,
+      createdAt: now,
+      finishedAt: null,
+      elapsed: null,
+      falRecoverable: false,
+      customRecoverable: false,
+    })
+    executeTask(task.id)
+    return
+  }
+
   const taskId = genId()
   const newTask: TaskRecord = {
     id: taskId,

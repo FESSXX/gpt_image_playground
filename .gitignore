@@ -2,3 +2,7 @@ node_modules/
 dist/
 dev-proxy.config.json
 .wrangler/
+.trellis/
+AGENTS.md
+.codex/
+.agents/

@@ -95,7 +95,7 @@ async function blobToDataUrl(blob: Blob, fallbackMime: string): Promise<string> 
   return `data:${blob.type || fallbackMime};base64,${btoa(binary)}`
 }
 
-export const IMAGE_FETCH_CORS_HINT = ' 可点链接按钮复制结果链接，或尝试开启「返回 Base64 图片数据」避免此问题。'
+export const IMAGE_FETCH_CORS_HINT = ' 可点链接按钮复制结果链接，也可点下载按钮直接下载原始链接；或尝试开启「返回 Base64 图片数据」避免此问题。'
 export const STREAMING_UNSUPPORTED_HINT = '提示：当前使用的 API 可能不支持流式传输，请尝试关闭「流式传输」功能。'
 export const STREAMING_FORMAT_HINT = '提示：API 返回了无法解析的流式数据格式，请尝试关闭「流式传输」功能。'
 

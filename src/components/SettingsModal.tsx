@@ -14,6 +14,7 @@ import {
   findEquivalentApiProfile,
   getApiProviderLabel,
   getActiveApiProfile,
+  getAgentApiProfile,
   importCustomProviderSettingsFromJson,
   isDefaultConfigOnlyEnabled,
   isOpenAICompatibleProvider,
@@ -315,6 +316,7 @@ export default function SettingsModal() {
   
   const [draft, setDraft] = useState<AppSettings>(normalizeSettings(settings))
   const [timeoutInput, setTimeoutInput] = useState(String(getActiveApiProfile(settings).timeout))
+  const [agentTimeoutInput, setAgentTimeoutInput] = useState(String(getAgentApiProfile(settings).timeout))
   const [agentMaxToolRoundsInput, setAgentMaxToolRoundsInput] = useState(String(settings.agentMaxToolRounds))
   const [showApiKey, setShowApiKey] = useState(false)
   const [showProfileMenu, setShowProfileMenu] = useState(false)
@@ -358,6 +360,7 @@ export default function SettingsModal() {
   const apiProxyLocked = isApiProxyLocked(apiProxyConfig)
   const defaultConfigOnly = isDefaultConfigOnlyEnabled()
   const activeProfile = draft.profiles.find((profile) => profile.id === draft.activeProfileId) ?? draft.profiles[0] ?? getActiveApiProfile(draft)
+  const agentProfile = draft.profiles.find((profile) => profile.id === draft.agentProfileId) ?? getAgentApiProfile(draft)
   const activeProviderIsOpenAICompatible = isOpenAICompatibleProvider(draft, activeProfile.provider)
   const activeProviderUsesApiUrl = activeProviderIsOpenAICompatible || activeProfile.provider === 'fal'
   const activeCustomProvider = draft.customProviders.find((provider) => provider.id === activeProfile.provider)
@@ -365,6 +368,10 @@ export default function SettingsModal() {
   const activeCustomProviderAsync = isAsyncCustomProvider(activeCustomProvider)
   const apiProxyChecked = activeProfileApiProxyEligible && (apiProxyLocked || activeProfile.apiProxy)
   const apiProxyEnabled = apiProxyAvailable && activeProfileApiProxyEligible && apiProxyChecked
+  const agentProfileApiProxyEligible = isProfileApiProxyEligible(draft, agentProfile)
+  const agentApiProxyChecked = agentProfileApiProxyEligible && (apiProxyLocked || agentProfile.apiProxy)
+  const agentApiProxyEnabled = apiProxyAvailable && agentProfileApiProxyEligible && agentApiProxyChecked
+  const agentProfileSupportsAgent = agentProfile.provider === 'openai' && agentProfile.apiMode === 'responses'
   const defaultProviderOrder = ['openai', 'fal', ...draft.customProviders.map(p => p.id)]
   const providerOrder = draft.providerOrder || defaultProviderOrder
 
@@ -433,12 +440,17 @@ export default function SettingsModal() {
     })
     setDraft(nextDraft)
     setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
+    setAgentTimeoutInput(String(getAgentApiProfile(nextDraft).timeout))
     setAgentMaxToolRoundsInput(String(nextDraft.agentMaxToolRounds))
   }, [apiProxyAvailable, apiProxyLocked, showSettings, settings, reusedTaskApiProfileId])
 
   useEffect(() => {
     setTimeoutInput(String(activeProfile.timeout))
   }, [activeProfile.id, activeProfile.timeout])
+
+  useEffect(() => {
+    setAgentTimeoutInput(String(agentProfile.timeout))
+  }, [agentProfile.id, agentProfile.timeout])
 
   useEffect(() => {
     if (showSettings && settingsTabRequest) setActiveTab(settingsTabRequest)
@@ -638,10 +650,12 @@ export default function SettingsModal() {
     setCopyImportUrlOptions(readCopyImportUrlOptions())
   }
 
-  const getDraftWithActiveProfilePatch = (patch: Partial<ApiProfile>) => ({
+  const getDraftWithProfilePatch = (profileId: string, patch: Partial<ApiProfile>) => ({
       ...draft,
-      profiles: draft.profiles.map((profile) => profile.id === activeProfile.id ? { ...profile, ...patch } : profile),
+      profiles: draft.profiles.map((profile) => profile.id === profileId ? { ...profile, ...patch } : profile),
     })
+
+  const getDraftWithActiveProfilePatch = (patch: Partial<ApiProfile>) => getDraftWithProfilePatch(activeProfile.id, patch)
 
   const updateActiveProfile = (patch: Partial<ApiProfile>, commit = false) => {
     const nextDraft = getDraftWithActiveProfilePatch(patch)
@@ -651,6 +665,17 @@ export default function SettingsModal() {
 
   const commitActiveProfilePatch = (patch: Partial<ApiProfile>) => {
     const nextDraft = getDraftWithActiveProfilePatch(patch)
+    commitSettings(nextDraft)
+  }
+
+  const updateAgentProfile = (patch: Partial<ApiProfile>, commit = false) => {
+    const nextDraft = getDraftWithProfilePatch(agentProfile.id, patch)
+    setDraft(nextDraft)
+    if (commit) commitSettings(nextDraft)
+  }
+
+  const commitAgentProfilePatch = (patch: Partial<ApiProfile>) => {
+    const nextDraft = getDraftWithProfilePatch(agentProfile.id, patch)
     commitSettings(nextDraft)
   }
 
@@ -667,16 +692,24 @@ export default function SettingsModal() {
     const normalizedAgentMaxToolRounds = agentMaxToolRoundsInput.trim() === ''
       ? DEFAULT_AGENT_MAX_TOOL_ROUNDS
       : normalizeAgentMaxToolRounds(agentMaxToolRoundsInput, draft.agentMaxToolRounds)
+    const nextAgentTimeout = Number(agentTimeoutInput)
+    const normalizedAgentTimeout =
+      agentTimeoutInput.trim() === '' || Number.isNaN(nextAgentTimeout)
+        ? DEFAULT_SETTINGS.timeout
+        : nextAgentTimeout
     const nextDraft = {
       ...draft,
       agentMaxToolRounds: normalizedAgentMaxToolRounds,
-      profiles: activeProviderIsOpenAICompatible
-        ? draft.profiles.map((profile) =>
-            profile.id === activeProfile.id ? { ...profile, timeout: normalizedTimeout } : profile,
-          )
-        : draft.profiles,
+      profiles: draft.profiles.map((profile) =>
+        profile.id === activeProfile.id && activeProviderIsOpenAICompatible
+          ? { ...profile, timeout: normalizedTimeout }
+          : profile.id === agentProfile.id && isOpenAICompatibleProvider(draft, agentProfile.provider)
+          ? { ...profile, timeout: normalizedAgentTimeout }
+          : profile,
+      ),
     }
     setAgentMaxToolRoundsInput(String(normalizedAgentMaxToolRounds))
+    setAgentTimeoutInput(String(normalizedAgentTimeout))
     commitSettings(nextDraft)
     setShowSettings(false)
   }
@@ -689,6 +722,15 @@ export default function SettingsModal() {
     setTimeoutInput(String(normalizedTimeout))
     updateActiveProfile({ timeout: normalizedTimeout }, true)
   }, [draft, activeProfile.id, activeProfile.provider, activeProfile.timeout, timeoutInput])
+
+  const commitAgentTimeout = useCallback(() => {
+    if (!isOpenAICompatibleProvider(draft, agentProfile.provider)) return
+    const nextTimeout = Number(agentTimeoutInput)
+    const normalizedTimeout =
+      agentTimeoutInput.trim() === '' ? DEFAULT_SETTINGS.timeout : Number.isNaN(nextTimeout) ? agentProfile.timeout : nextTimeout
+    setAgentTimeoutInput(String(normalizedTimeout))
+    updateAgentProfile({ timeout: normalizedTimeout }, true)
+  }, [agentTimeoutInput, draft, agentProfile.id, agentProfile.provider, agentProfile.timeout])
 
   const commitAgentMaxToolRounds = useCallback(() => {
     const value = agentMaxToolRoundsInput.trim() === ''
@@ -740,6 +782,7 @@ export default function SettingsModal() {
           const nextDraft = normalizeSettings(useStore.getState().settings)
           setDraft(nextDraft)
           setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
+          setAgentTimeoutInput(String(getAgentApiProfile(nextDraft).timeout))
           setShowProfileMenu(false)
         }
       } finally {
@@ -754,6 +797,7 @@ export default function SettingsModal() {
     const nextDraft = normalizeSettings(useStore.getState().settings)
     setDraft(nextDraft)
     setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
+    setAgentTimeoutInput(String(getAgentApiProfile(nextDraft).timeout))
     setShowProfileMenu(false)
   }
 
@@ -794,6 +838,27 @@ export default function SettingsModal() {
     const nextDraft = normalizeSettings({ ...draft, activeProfileId: id })
     commitSettings(nextDraft)
     setShowProfileMenu(false)
+  }
+
+  const createNewAgentProfile = () => {
+    if (defaultConfigOnly) return
+    const profile = createDefaultOpenAIProfile({
+      id: newId('openai'),
+      name: 'Agent 配置',
+      apiMode: 'responses',
+      model: DEFAULT_RESPONSES_MODEL,
+    })
+    const nextDraft = normalizeSettings({
+      ...draft,
+      profiles: [...draft.profiles, profile],
+      agentProfileId: profile.id,
+    })
+    commitSettings(nextDraft)
+  }
+
+  const switchAgentProfile = (id: string) => {
+    const nextDraft = normalizeSettings({ ...draft, agentProfileId: id })
+    commitSettings(nextDraft)
   }
   
   const handleProfileDragStart = (e: React.DragEvent, id: string) => {
@@ -1101,6 +1166,7 @@ export default function SettingsModal() {
         setDraft(nextDraft)
         setSettings(nextDraft)
         setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
+        setAgentTimeoutInput(String(getAgentApiProfile(nextDraft).timeout))
         setShowCustomProviderImport(false)
         setEditingCustomProviderId(null)
         setCustomProviderImportError(null)
@@ -1145,7 +1211,7 @@ export default function SettingsModal() {
             设置
           </h3>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-400 dark:text-gray-500 font-mono select-none">v{__APP_VERSION__}</span>
+            <span className="text-sm text-gray-400 dark:text-gray-500 font-mono select-none">v0.1</span>
             <button
               onClick={handleClose}
               className="rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
@@ -1255,20 +1321,38 @@ export default function SettingsModal() {
                 </div>
                 <div className="block">
                   <div className="mb-1 flex items-center justify-between">
-                    <span className="block text-sm text-gray-600 dark:text-gray-300">提交任务后清空输入框</span>
+                    <span className="block text-sm text-gray-600 dark:text-gray-300">提交后清空</span>
                     <button
                       type="button"
                       onClick={() => commitSettings({ ...draft, clearInputAfterSubmit: !draft.clearInputAfterSubmit })}
                       className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.clearInputAfterSubmit ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
                       role="switch"
                       aria-checked={draft.clearInputAfterSubmit}
-                      aria-label="提交任务后清空输入框"
+                      aria-label="提交后清空"
                     >
                       <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.clearInputAfterSubmit ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
                     </button>
                   </div>
                   <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-                    开启后，提交成功创建任务时会清空提示词和参考图。
+                    开启后，提交成功创建任务时会清空提示词。
+                  </div>
+                </div>
+                <div className="block">
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="block text-sm text-gray-600 dark:text-gray-300">提交后清空参考图</span>
+                    <button
+                      type="button"
+                      onClick={() => commitSettings({ ...draft, clearReferenceImagesAfterSubmit: !draft.clearReferenceImagesAfterSubmit })}
+                      className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.clearReferenceImagesAfterSubmit ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                      role="switch"
+                      aria-checked={draft.clearReferenceImagesAfterSubmit}
+                      aria-label="提交后清空参考图"
+                    >
+                      <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.clearReferenceImagesAfterSubmit ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+                    </button>
+                  </div>
+                  <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
+                    开启后，提交成功创建任务时会同时清空参考图。
                   </div>
                 </div>
                 <div className="block">
@@ -1419,6 +1503,154 @@ export default function SettingsModal() {
 
             {activeTab === 'agent' && (
               <div className="space-y-4">
+                <div className="space-y-3 border-b border-gray-200/70 pb-4 dark:border-white/[0.08]">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">Agent API 配置</span>
+                    <button
+                      type="button"
+                      onClick={createNewAgentProfile}
+                      disabled={defaultConfigOnly}
+                      className={`rounded-xl px-3 py-1.5 text-xs font-medium transition ${defaultConfigOnly ? 'cursor-not-allowed bg-gray-100 text-gray-400 dark:bg-white/[0.04] dark:text-gray-500' : 'bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/20'}`}
+                    >
+                      新建 Responses 配置
+                    </button>
+                  </div>
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">当前 Agent 配置</span>
+                    <Select
+                      value={agentProfile.id}
+                      onChange={(value) => switchAgentProfile(String(value))}
+                      options={draft.profiles.map((profile) => ({
+                        label: `${profile.name} · ${getApiProviderLabel(draft, profile.provider)} · ${profile.apiMode === 'responses' ? 'Responses' : 'Images'}`,
+                        value: profile.id,
+                      }))}
+                      className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                    />
+                    {!agentProfileSupportsAgent && (
+                      <div data-selectable-text className="mt-1.5 text-xs text-yellow-600 dark:text-yellow-500">
+                        Agent 模式需要 OpenAI Responses API 配置。请选择已有 Responses 配置，或新建一个。
+                      </div>
+                    )}
+                  </label>
+
+                  {agentProfile.provider === 'openai' && agentProfile.apiMode !== 'responses' && (
+                    <button
+                      type="button"
+                      onClick={() => updateAgentProfile({
+                        apiMode: 'responses',
+                        model: agentProfile.model === DEFAULT_IMAGES_MODEL ? DEFAULT_RESPONSES_MODEL : agentProfile.model,
+                        streamImages: true,
+                      }, true)}
+                      className="rounded-xl bg-gray-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200"
+                    >
+                      将当前配置切换为 Responses API
+                    </button>
+                  )}
+
+                  {agentProfile.provider === 'openai' && (
+                    <>
+                      <label className="block">
+                        <div className="mb-1.5 flex items-center justify-between">
+                          <span className="block text-sm text-gray-600 dark:text-gray-300">API URL</span>
+                        </div>
+                        <input
+                          value={agentProfile.baseUrl}
+                          onChange={(e) => updateAgentProfile({ baseUrl: e.target.value })}
+                          onBlur={(e) => commitAgentProfilePatch({ baseUrl: e.target.value })}
+                          type="text"
+                          disabled={agentApiProxyEnabled}
+                          placeholder={DEFAULT_SETTINGS.baseUrl}
+                          className={`w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 ${agentApiProxyEnabled ? 'cursor-not-allowed opacity-50' : ''}`}
+                        />
+                        {agentApiProxyEnabled && (
+                          <div data-selectable-text className="mt-1.5 text-xs text-yellow-600 dark:text-yellow-500">
+                            已开启代理，实际请求目标由部署端决定，此处设置被忽略。
+                          </div>
+                        )}
+                      </label>
+
+                      {apiProxyAvailable && agentProfileApiProxyEligible && (
+                        <div className="block">
+                          <div className="mb-1.5 flex items-center justify-between">
+                            <span className="block text-sm text-gray-600 dark:text-gray-300">API 代理</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!apiProxyLocked) updateAgentProfile({ apiProxy: !agentProfile.apiProxy }, true)
+                              }}
+                              disabled={apiProxyLocked}
+                              className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${agentApiProxyChecked ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'} ${apiProxyLocked ? 'cursor-not-allowed opacity-70' : ''}`}
+                              role="switch"
+                              aria-checked={agentApiProxyChecked}
+                              aria-label="Agent API 代理"
+                            >
+                              <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${agentApiProxyChecked ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="block">
+                        <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">API Key</span>
+                        <div className="relative">
+                          <input
+                            value={agentProfile.apiKey}
+                            onChange={(e) => updateAgentProfile({ apiKey: e.target.value })}
+                            onBlur={(e) => commitAgentProfilePatch({ apiKey: e.target.value })}
+                            type={showApiKey ? 'text' : 'password'}
+                            placeholder="sk-..."
+                            className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 pr-10 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowApiKey((v) => !v)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 transition-colors hover:text-gray-600"
+                            tabIndex={-1}
+                          >
+                            {showApiKey ? (
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                <circle cx="12" cy="12" r="3" />
+                              </svg>
+                            ) : (
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                                <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+                                <line x1="1" y1="1" x2="23" y2="23" />
+                              </svg>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      <label className="block">
+                        <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">模型 ID</span>
+                        <input
+                          value={agentProfile.model}
+                          onChange={(e) => updateAgentProfile({ model: e.target.value })}
+                          onBlur={(e) => commitAgentProfilePatch({ model: e.target.value })}
+                          type="text"
+                          placeholder={DEFAULT_RESPONSES_MODEL}
+                          className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">请求超时（秒）</span>
+                        <input
+                          value={agentTimeoutInput}
+                          onChange={(e) => setAgentTimeoutInput(e.target.value)}
+                          onBlur={commitAgentTimeout}
+                          type="number"
+                          min={1}
+                          className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                        />
+                      </label>
+                    </>
+                  )}
+                </div>
+
                 <label className="block">
                   <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">最大工具调用轮数</span>
                   <input
@@ -2067,7 +2299,7 @@ export default function SettingsModal() {
                   > 本站点基于开源项目 [GPT Image Playground](https://github.com/CookSleep/gpt_image_playground) ([MIT](https://github.com/CookSleep/gpt_image_playground/blob/main/LICENSE)) 修改。
                 */}
                 <a
-                  href="https://github.com/CookSleep/gpt_image_playground"
+                  href="https://github.com/FESSXX/gpt_image_playground"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="group flex flex-col items-center outline-none"
@@ -2077,7 +2309,7 @@ export default function SettingsModal() {
                   </div>
                   <h4 className="text-[17px] font-bold text-gray-800 dark:text-gray-100">GPT Image Playground</h4>
                   <p className="mt-1.5 text-[13px] text-gray-500 transition-colors group-hover:text-gray-700 dark:text-gray-400 dark:group-hover:text-gray-300">
-                    @CookSleep
+                    @FESSXX
                   </p>
                 </a>
                 
@@ -2087,7 +2319,7 @@ export default function SettingsModal() {
 
                 <div className="flex flex-wrap items-center justify-center gap-3">
                   <a
-                    href="https://github.com/CookSleep/gpt_image_playground/issues"
+                    href="https://github.com/FESSXX/gpt_image_playground/issues"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-gray-100/80 px-5 py-2.5 text-sm font-medium text-gray-700 transition-all hover:bg-gray-200 hover:text-gray-900 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] dark:hover:text-white"

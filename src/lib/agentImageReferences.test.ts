@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentRound, TaskRecord } from '../types'
 import { DEFAULT_PARAMS } from '../types'
 import { getSelectedImageMentionLabel, getSelectedTextMentionLabel } from './promptImageMentions'
-import { extractAgentReferenceIds, replaceAgentPromptImageReferencesForApi, resolveAgentPromptImageReferences } from './agentImageReferences'
+import { extractAgentReferenceIds, replaceAgentPromptImageReferencesForApi, resolveAgentPromptImageReferenceEntries, resolveAgentPromptImageReferences } from './agentImageReferences'
 
 const round = (patch: Partial<AgentRound>): AgentRound => ({
   id: patch.id ?? `round-${patch.index ?? 1}`,
@@ -52,6 +52,21 @@ describe('agent image references', () => {
       task('task-a', ['image-a1', 'image-a2']),
       task('task-b', ['image-b1']),
     ])).toEqual(['image-a2', 'image-b1'])
+  })
+
+  it('resolves previous round image reference labels and ids', () => {
+    const rounds = [
+      round({ index: 1, outputTaskIds: ['task-a'] }),
+      round({ index: 2, outputTaskIds: ['task-b'] }),
+    ]
+
+    expect(resolveAgentPromptImageReferenceEntries('参考 @第1轮图2 和 @2轮图1', rounds, [
+      task('task-a', ['image-a1', 'image-a2']),
+      task('task-b', ['image-b1']),
+    ])).toEqual([
+      { label: '@第1轮图2', imageId: 'image-a2' },
+      { label: '@2轮图1', imageId: 'image-b1' },
+    ])
   })
 
   it('keeps previous round image numbering stable after a task is removed', () => {

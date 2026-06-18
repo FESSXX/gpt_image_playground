@@ -97,6 +97,7 @@ export interface AppSettings {
   customProviders: CustomProviderDefinition[]
   providerOrder?: string[]
   clearInputAfterSubmit: boolean
+  clearReferenceImagesAfterSubmit: boolean
   persistInputOnRestart: boolean
   reuseTaskApiProfileTemporarily: boolean
   alwaysShowRetryButton: boolean
@@ -110,6 +111,7 @@ export interface AppSettings {
   agentMathFormattingPrompt: boolean
   profiles: ApiProfile[]
   activeProfileId: string
+  agentProfileId: string
 }
 
 // ===== 任务参数 =====

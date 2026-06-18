@@ -430,6 +430,24 @@ export default function DetailModal() {
     }
   }
 
+  const handleDownloadRawImageUrls = async (urls = rawImageUrls, fileNameBase = task ? `task-${task.id}-raw` : 'raw-image') => {
+    if (!urls.length) return
+
+    try {
+      const result = await downloadImageIds(urls, fileNameBase)
+      if (result.successCount === 0) {
+        showToast('下载失败', 'error')
+      } else if (result.failCount > 0) {
+        showToast(`部分下载失败：成功 ${result.successCount}，失败 ${result.failCount}`, 'error')
+      } else {
+        showToast(result.successCount > 1 ? `下载成功：${result.successCount} 张图片` : '下载成功', 'success')
+      }
+    } catch (err) {
+      console.error(err)
+      showToast('下载失败', 'error')
+    }
+  }
+
   const handleRetry = () => {
     retryTask(task)
     setDetailTaskId(null)
@@ -444,7 +462,7 @@ export default function DetailModal() {
       <div className="absolute inset-0 bg-black/20 dark:bg-black/40 backdrop-blur-md animate-overlay-in" />
       <div
         ref={modalRef}
-        className="relative bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] rounded-3xl shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col md:flex-row z-10 ring-1 ring-black/5 dark:ring-white/10 animate-modal-in"
+        className="relative bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] rounded-3xl shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] max-w-5xl w-full max-h-[92vh] overflow-hidden flex flex-col md:flex-row z-10 ring-1 ring-black/5 dark:ring-white/10 animate-modal-in"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex h-14 items-center justify-end px-4 md:hidden">
@@ -458,7 +476,7 @@ export default function DetailModal() {
         </div>
 
         {/* 左侧：图片 */}
-        <div className="md:w-1/2 w-full h-64 md:h-auto bg-gray-100 dark:bg-black/20 relative flex items-center justify-center flex-shrink-0 min-h-[16rem]">
+        <div className="md:w-[52%] w-full h-72 md:h-auto bg-gray-100 dark:bg-black/20 relative flex items-center justify-center flex-shrink-0 min-h-[18rem]">
           {task.status === 'done' && outputLen > 0 && (currentOutputImageId || task.outputImages.length > 0) && (
             <div className="absolute right-3 top-[15px] z-20 flex items-center gap-1.5">
               {currentOutputImageId && (
@@ -763,33 +781,44 @@ export default function DetailModal() {
                   </div>
                 )}
                 {task.rawImageUrls && task.rawImageUrls.length > 0 && (
-                  <div className="relative group">
+                  <>
+                    <div className="relative group">
+                      <button
+                        type="button"
+                        {...copyRawUrlsTooltip.handlers}
+                        onClick={async () => {
+                          if (task.rawImageUrls!.length === 1) {
+                            copyRawUrlsTooltip.handlers.onClick()
+                            try {
+                              await copyTextToClipboard(task.rawImageUrls![0])
+                              showToast('图片链接已复制', 'success')
+                            } catch (err) {
+                              showToast(getClipboardFailureMessage('复制链接失败', err), 'error')
+                            }
+                          } else {
+                            dismissAllTooltips()
+                            setShowRawUrlsModal(true)
+                          }
+                        }}
+                        className="inline-flex items-center justify-center rounded-full border border-green-200/80 bg-green-50 px-3 py-1.5 text-green-600 transition hover:bg-green-100 dark:border-green-500/20 dark:bg-green-500/10 dark:text-green-400 dark:hover:bg-green-500/20"
+                        aria-label="复制图片链接"
+                      >
+                        <LinkIcon className="h-4 w-4" />
+                      </button>
+                      <ViewportTooltip visible={copyRawUrlsTooltip.visible} className="whitespace-nowrap">
+                        复制图片链接
+                      </ViewportTooltip>
+                    </div>
                     <button
                       type="button"
-                      {...copyRawUrlsTooltip.handlers}
-                      onClick={async () => {
-                        if (task.rawImageUrls!.length === 1) {
-                          copyRawUrlsTooltip.handlers.onClick()
-                          try {
-                            await copyTextToClipboard(task.rawImageUrls![0])
-                            showToast('图片链接已复制', 'success')
-                          } catch (err) {
-                            showToast(getClipboardFailureMessage('复制链接失败', err), 'error')
-                          }
-                        } else {
-                          dismissAllTooltips()
-                          setShowRawUrlsModal(true)
-                        }
-                      }}
-                      className="inline-flex items-center justify-center rounded-full border border-green-200/80 bg-green-50 px-3 py-1.5 text-green-600 transition hover:bg-green-100 dark:border-green-500/20 dark:bg-green-500/10 dark:text-green-400 dark:hover:bg-green-500/20"
-                      aria-label="复制图片链接"
+                      onClick={() => void handleDownloadRawImageUrls()}
+                      className="inline-flex items-center justify-center rounded-full border border-blue-200/80 bg-blue-50 px-3 py-1.5 text-blue-600 transition hover:bg-blue-100 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/20"
+                      aria-label="下载原始图片链接"
+                      title="下载原始图片链接"
                     >
-                      <LinkIcon className="h-4 w-4" />
+                      <DownloadIcon className="h-4 w-4" />
                     </button>
-                    <ViewportTooltip visible={copyRawUrlsTooltip.visible} className="whitespace-nowrap">
-                      复制图片链接
-                    </ViewportTooltip>
-                  </div>
+                  </>
                 )}
                 {streamPartialImageIds.length > 0 && (
                   <div className="relative group">
@@ -835,7 +864,7 @@ export default function DetailModal() {
         </div>
 
         {/* 右侧：信息 */}
-        <div className="md:w-1/2 w-full p-5 overflow-y-auto overscroll-contain flex flex-col">
+        <div className="md:w-[48%] w-full p-6 overflow-y-auto overscroll-contain flex flex-col">
           <button
             onClick={() => setDetailTaskId(null)}
             className="absolute top-3 right-3 hidden p-1 rounded-full hover:bg-gray-100 dark:hover:bg-white/[0.06] transition text-gray-400 z-10 md:block"
@@ -846,7 +875,7 @@ export default function DetailModal() {
 
           <div data-selectable-text className="flex-1">
             <div className="flex items-center gap-1.5 mb-2">
-              <h3 className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+              <h3 className="text-sm font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
                 输入内容
               </h3>
               {task.prompt && !showPendingPrompt && (
@@ -875,11 +904,11 @@ export default function DetailModal() {
             </div>
             {showPendingPrompt ? (
               <div className="mb-4 leading-relaxed">
-                <p className="text-sm text-gray-700 dark:text-gray-300">正在生成……</p>
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">输入内容将在响应完成时接收</p>
+                <p className="text-base text-gray-700 dark:text-gray-300">正在生成……</p>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">输入内容将在响应完成时接收</p>
               </div>
             ) : (
-              <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap mb-4">
+              <p className="text-base text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap mb-5">
                 {task.prompt || '(无提示词)'}
               </p>
             )}
@@ -896,7 +925,7 @@ export default function DetailModal() {
             {showReferenceSection && (
               <div className="mb-4">
                 <div className="flex items-center gap-1.5 mb-2">
-                  <h3 className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                  <h3 className="text-sm font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
                     参考图
                   </h3>
                   {allInputImageIds.length > 0 && (
@@ -942,13 +971,13 @@ export default function DetailModal() {
                       })}
                     </div>
                     {isAgentEditTool && (
-                      <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                      <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">
                         由模型自主选择，可能包含其他图片
                       </div>
                     )}
                   </>
                 ) : (
-                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                  <div className="text-sm text-gray-500 dark:text-gray-400">
                     由模型自主选择
                   </div>
                 )}
@@ -956,46 +985,46 @@ export default function DetailModal() {
             )}
 
             {/* 参数 */}
-            <h3 className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
+            <h3 className="text-sm font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
               参数配置
             </h3>
             {showSourceInfo && (
-              <div className="mb-2 min-w-0 overflow-hidden rounded-lg bg-gray-50 px-3 py-2 text-xs dark:bg-white/[0.03]">
+              <div className="mb-3 min-w-0 overflow-hidden rounded-xl bg-gray-50 px-4 py-3 text-sm dark:bg-white/[0.03]">
                 <span className="text-gray-400 dark:text-gray-500">来源</span>
                 <br />
-                <div className="mt-0.5 overflow-x-auto hide-scrollbar whitespace-nowrap mask-edge-r pr-2">
+                <div className="mt-1 overflow-x-auto hide-scrollbar whitespace-nowrap mask-edge-r pr-2">
                   <span className="font-medium text-gray-700 dark:text-gray-200">{taskProviderName}</span>
                   <span className="text-gray-400 dark:text-gray-500"> · {taskProfileName} · {taskModel}</span>
                 </div>
               </div>
             )}
-            <div className="grid grid-cols-2 gap-2 text-xs mb-4 min-w-0">
-              <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2 min-w-0 overflow-hidden">
+            <div className="grid grid-cols-2 gap-3 text-sm mb-5 min-w-0">
+              <div className="bg-gray-50 dark:bg-white/[0.03] rounded-xl px-4 py-3 min-w-0 overflow-hidden">
                 <span className="text-gray-400 dark:text-gray-500">尺寸</span>
                 <br />
-                <div className="mt-0.5 overflow-x-auto hide-scrollbar whitespace-nowrap mask-edge-r pr-2">
+                <div className="mt-1 overflow-x-auto hide-scrollbar whitespace-nowrap mask-edge-r pr-2">
                   <DetailParamValue task={task} paramKey="size" className="font-medium" actualParams={currentActualParams} />
                 </div>
               </div>
-              <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2 min-w-0 overflow-hidden">
+              <div className="bg-gray-50 dark:bg-white/[0.03] rounded-xl px-4 py-3 min-w-0 overflow-hidden">
                 <span className="text-gray-400 dark:text-gray-500">质量</span>
                 <br />
-                <div className="mt-0.5 overflow-x-auto hide-scrollbar whitespace-nowrap mask-edge-r pr-2">
+                <div className="mt-1 overflow-x-auto hide-scrollbar whitespace-nowrap mask-edge-r pr-2">
                   <DetailParamValue task={task} paramKey="quality" className="font-medium" actualParams={currentActualParams} />
                 </div>
               </div>
-              <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2 min-w-0 overflow-hidden">
+              <div className="bg-gray-50 dark:bg-white/[0.03] rounded-xl px-4 py-3 min-w-0 overflow-hidden">
                 <span className="text-gray-400 dark:text-gray-500">格式</span>
                 <br />
-                <div className="mt-0.5 overflow-x-auto hide-scrollbar whitespace-nowrap mask-edge-r pr-2">
+                <div className="mt-1 overflow-x-auto hide-scrollbar whitespace-nowrap mask-edge-r pr-2">
                   <DetailParamValue task={task} paramKey="output_format" className="font-medium" actualParams={currentActualParams} />
                 </div>
               </div>
               {isPngOutput ? (
-                <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2 min-w-0 overflow-hidden">
+                <div className="bg-gray-50 dark:bg-white/[0.03] rounded-xl px-4 py-3 min-w-0 overflow-hidden">
                   <span className="text-gray-400 dark:text-gray-500">透明背景</span>
                   <br />
-                  <div className="mt-0.5 overflow-x-auto hide-scrollbar whitespace-nowrap mask-edge-r pr-2">
+                  <div className="mt-1 overflow-x-auto hide-scrollbar whitespace-nowrap mask-edge-r pr-2">
                     <span className="font-medium text-gray-700 dark:text-gray-300">{transparentOutputText}</span>
                     {currentTransparentOutputFailed && (
                       <span className="ml-1.5 rounded bg-red-50 px-1 py-0.5 text-[10px] font-medium uppercase leading-none text-red-600 dark:bg-red-500/10 dark:text-red-400">
@@ -1005,26 +1034,26 @@ export default function DetailModal() {
                   </div>
                 </div>
               ) : (
-                <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2 min-w-0 overflow-hidden">
+                <div className="bg-gray-50 dark:bg-white/[0.03] rounded-xl px-4 py-3 min-w-0 overflow-hidden">
                   <span className="text-gray-400 dark:text-gray-500">压缩率</span>
                   <br />
-                  <div className="mt-0.5 overflow-x-auto hide-scrollbar whitespace-nowrap mask-edge-r pr-2">
+                  <div className="mt-1 overflow-x-auto hide-scrollbar whitespace-nowrap mask-edge-r pr-2">
                     <span className="font-medium text-gray-700 dark:text-gray-300">{outputCompressionText}</span>
                   </div>
                 </div>
               )}
-              <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2 min-w-0 overflow-hidden">
+              <div className="bg-gray-50 dark:bg-white/[0.03] rounded-xl px-4 py-3 min-w-0 overflow-hidden">
                 <span className="text-gray-400 dark:text-gray-500">审核</span>
                 <br />
-                <div className="mt-0.5 overflow-x-auto hide-scrollbar whitespace-nowrap mask-edge-r pr-2">
+                <div className="mt-1 overflow-x-auto hide-scrollbar whitespace-nowrap mask-edge-r pr-2">
                   <DetailParamValue task={task} paramKey="moderation" className="font-medium" actualParams={currentActualParams} />
                 </div>
               </div>
               {!isAgentTask && (
-                <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2 min-w-0 overflow-hidden">
+                <div className="bg-gray-50 dark:bg-white/[0.03] rounded-xl px-4 py-3 min-w-0 overflow-hidden">
                   <span className="text-gray-400 dark:text-gray-500">数量</span>
                   <br />
-                  <div className="mt-0.5 overflow-x-auto hide-scrollbar whitespace-nowrap mask-edge-r pr-2">
+                  <div className="mt-1 overflow-x-auto hide-scrollbar whitespace-nowrap mask-edge-r pr-2">
                     <DetailParamValue task={task} paramKey="n" className="font-medium" />
                   </div>
                 </div>
@@ -1032,19 +1061,19 @@ export default function DetailModal() {
             </div>
 
             {/* 时间 */}
-            <div className="text-xs text-gray-400 dark:text-gray-500 mb-4">
+            <div className="text-sm text-gray-400 dark:text-gray-500 mb-5">
               <span>创建于 {formatTime(task.createdAt)}</span>
               {formatDuration() && <span> · 耗时 {formatDuration()}</span>}
             </div>
           </div>
 
           {/* 操作按钮 */}
-          <div className="grid grid-cols-4 sm:flex gap-2 pt-4 border-t border-gray-100 dark:border-white/[0.08]">
+          <div className="grid grid-cols-4 sm:flex gap-3 pt-5 border-t border-gray-100 dark:border-white/[0.08]">
             <button
               onClick={handleReuse}
-              className="col-span-2 sm:flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 transition text-sm font-medium whitespace-nowrap"
+              className="col-span-2 sm:flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 transition text-base font-medium whitespace-nowrap"
             >
-              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
               </svg>
               复用配置
@@ -1052,28 +1081,28 @@ export default function DetailModal() {
             <button
               onClick={handleEdit}
               disabled={!outputLen}
-              className="col-span-2 sm:flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-green-50 dark:bg-green-500/10 text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition text-sm font-medium whitespace-nowrap"
+              className="col-span-2 sm:flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-green-50 dark:bg-green-500/10 text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition text-base font-medium whitespace-nowrap"
             >
-              <EditIcon className="w-4 h-4 flex-shrink-0" />
+              <EditIcon className="w-5 h-5 flex-shrink-0" />
               编辑输出
             </button>
             <button
               onClick={handleDelete}
-              className="col-span-3 sm:flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-500/20 transition text-sm font-medium whitespace-nowrap"
+              className="col-span-3 sm:flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-500/20 transition text-base font-medium whitespace-nowrap"
             >
-              <TrashIcon className="w-4 h-4 flex-shrink-0" />
+              <TrashIcon className="w-5 h-5 flex-shrink-0" />
               删除任务
             </button>
             <button
               onClick={handleToggleFavorite}
-              className={`col-span-1 sm:flex-none sm:w-11 w-full flex items-center justify-center rounded-xl transition ${
+              className={`col-span-1 sm:flex-none sm:w-12 w-full flex items-center justify-center rounded-xl transition ${
                 task.isFavorite
                   ? 'bg-yellow-50 text-yellow-500 hover:bg-yellow-100 dark:bg-yellow-500/10 dark:hover:bg-yellow-500/20'
                   : 'bg-gray-50 text-gray-400 hover:bg-yellow-50 hover:text-yellow-500 dark:bg-white/[0.04] dark:hover:bg-yellow-500/10'
               }`}
               title={task.isFavorite ? '编辑收藏夹' : '收藏任务'}
             >
-              <svg className="w-5 h-5" fill={task.isFavorite ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-6 h-6" fill={task.isFavorite ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
               </svg>
             </button>
@@ -1114,6 +1143,14 @@ export default function DetailModal() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => void handleDownloadRawImageUrls()}
+                  className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 transition-colors text-xs font-medium"
+                >
+                  <DownloadIcon className="w-3.5 h-3.5" />
+                  全部下载
+                </button>
+                <button
+                  type="button"
                   onClick={() => setShowRawUrlsModal(false)}
                   className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-500 dark:hover:bg-white/[0.08] dark:hover:text-gray-300 transition-colors"
                 >
@@ -1148,6 +1185,15 @@ export default function DetailModal() {
                     >
                       <CopyIcon className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
                       <span className="hidden sm:inline">复制</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleDownloadRawImageUrls([url], `task-${task.id}-raw-${String(i + 1).padStart(2, '0')}`)}
+                      className="flex-shrink-0 p-2 sm:px-3 sm:py-1.5 flex items-center justify-center gap-1.5 rounded-lg bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 transition-colors text-xs font-medium border border-transparent dark:border-blue-500/10"
+                      title="下载"
+                    >
+                      <DownloadIcon className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                      <span className="hidden sm:inline">下载</span>
                     </button>
                   </div>
                 ))}
